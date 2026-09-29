@@ -94,7 +94,7 @@ export function CalendarWeek({
           <button className="join" type="button" onClick={() => setAnchor(new Date())}>
             Today
           </button>
-          <strong style={{ marginLeft: 6 }}>{weekLabel}</strong>
+          <strong className="cal-label">{weekLabel}</strong>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -166,7 +166,10 @@ export function CalendarWeek({
       {view === 'week' ? (
         <div
           className="calendar-week"
-          style={{ gridTemplateColumns: `54px repeat(${days.length}, 1fr)` }}
+          // Only the count travels inline. The `grid-template-columns`
+          // declaration itself lives in CSS so media queries can still
+          // override it -- an inline declaration would outrank them.
+          style={{ '--cols': days.length } as React.CSSProperties}
         >
           <div className="calendar-hours" />
           {days.map((day) => {
@@ -253,7 +256,7 @@ export function CalendarWeek({
       ) : (
         <div
           className="calendar-grid"
-          style={{ gridTemplateColumns: `repeat(${days.length}, 1fr)` }}
+          style={{ '--cols': days.length } as React.CSSProperties}
         >
           {days.map((day) => {
             const key = utcDayKey(day);

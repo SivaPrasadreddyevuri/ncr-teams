@@ -93,7 +93,7 @@ export default function ActivityPage() {
         )}
       </SectionCard>
 
-      <div className="cards-grid" style={{ gridColumn: '1 / -1', gridTemplateColumns: 'repeat(5, 1fr)' }}>
+      <div className="cards-grid cards-grid--quick">
         {JUMPS.map((jump) => (
           <Link className="team-card" href={jump.href} key={jump.href}>
             <div className="team-icon">

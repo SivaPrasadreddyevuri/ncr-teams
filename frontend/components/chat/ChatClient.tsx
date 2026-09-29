@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Paperclip, Send, Hash, QrCode, MessageSquare } from 'lucide-react';
+import { Paperclip, Send, Hash, MessageSquare, X, ChevronLeft } from 'lucide-react';
 import { Avatar } from '@/components/Avatar';
 import { initials, relativeTime } from '@/lib/format';
 import type { Channel, ChatMessage, Person } from '@/lib/data';
@@ -30,6 +30,11 @@ export function ChatClient({
   const [draft, setDraft] = useState('');
   const [thread, setThread] = useState<Thread>('chat');
   const [term, setTerm] = useState('');
+
+  // Phones show the thread full width with the channel list as a slide-over,
+  // so the same "which panel is in front" state has to live here. It is inert
+  // above 760px, where the two columns are visible side by side.
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const active = channels.find((c) => c.id === activeId) ?? channels[0];
 
@@ -70,12 +75,35 @@ export function ChatClient({
   }
 
   return (
-    <div className="page-grid">
+    <div
+      className={
+        drawerOpen ? 'page-grid chat-layout chat-drawer-open' : 'page-grid chat-layout'
+      }
+    >
+      {/* Dismisses the phone drawer by tapping outside it. */}
+      {drawerOpen && (
+        <button
+          type="button"
+          className="chat-drawer-scrim"
+          onClick={() => setDrawerOpen(false)}
+          aria-label="Close channels"
+        />
+      )}
       {/* Channel list */}
       <div className="panel">
         <div className="panel-head">
           <strong>Channels</strong>
           <span className="unread">{channels.length}</span>
+          {drawerOpen && (
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={() => setDrawerOpen(false)}
+              aria-label="Close channels"
+            >
+              <X size={16} />
+            </button>
+          )}
         </div>
 
         <div style={{ padding: '0 12px 8px' }}>
@@ -95,7 +123,10 @@ export function ChatClient({
             <button
               type="button"
               key={channel.id}
-              onClick={() => setActiveId(channel.id)}
+              onClick={() => {
+                setActiveId(channel.id);
+                setDrawerOpen(false);
+              }}
               className={channel.id === activeId ? 'conversation active' : 'conversation'}
             >
               <Hash size={16} />
@@ -117,6 +148,16 @@ export function ChatClient({
       {/* Thread */}
       <div className="panel chat-panel">
         <div className="panel-head">
+          {/* Only rendered in the phone layout, where the channel list is a
+              slide-over and this is the way back to it. */}
+          <button
+            type="button"
+            className="chat-back"
+            onClick={() => setDrawerOpen(true)}
+            aria-label="Show channels"
+          >
+            <ChevronLeft size={16} /> Channels
+          </button>
           <strong>
             <Hash size={15} /> {active?.name}
           </strong>

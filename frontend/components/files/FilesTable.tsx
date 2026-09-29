@@ -76,11 +76,10 @@ export function FilesTable({ initialFiles }: { initialFiles: FileRow[] }) {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
           <select
-            className="table-input"
+            className="table-input files-filter"
             value={team}
             onChange={(event) => setTeam(event.target.value)}
             aria-label="Filter by team"
-            style={{ width: 170, height: 38 }}
           >
             {teams.map((option) => (
               <option key={option} value={option}>
