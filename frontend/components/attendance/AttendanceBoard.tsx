@@ -1,12 +1,13 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { LogIn, LogOut, Clock3, CheckCircle2, Laptop, PieChart, UserX } from 'lucide-react';
 import { PersonAvatar } from '@/components/profile/PersonAvatar';
 import { useDirectory } from '@/components/profile/ProfileProvider';
+import { useWorkspace } from '@/components/workspace/WorkspaceProvider';
 import { SectionCard } from '@/components/SectionCard';
 import { formatTime, formatDayLabel, localDayKey } from '@/lib/format';
-import { attendance as seed, currentUser, type AttendanceRecord } from '@/lib/data';
+import type { AttendanceRecord } from '@/lib/data';
 
 const STATUSES: Array<{ id: AttendanceRecord['status']; label: string; tone: string; icon: typeof Clock3 }> = [
   { id: 'PRESENT', label: 'Present', tone: 'tone-blue', icon: CheckCircle2 },
@@ -16,131 +17,158 @@ const STATUSES: Array<{ id: AttendanceRecord['status']; label: string; tone: str
   { id: 'ABSENT', label: 'Absent', tone: 'tone-red', icon: UserX },
 ];
 
+/**
+ * Where the working day stands, derived rather than tracked.
+ *
+ * The two buttons used to carry their own `disabled` expressions built from
+ * `todayRecord`, which meant the pair could drift out of agreement. A single
+ * phase makes them mutually exclusive by construction: exactly one of them is
+ * ever actionable, and the reason is one value rather than four boolean terms.
+ */
+type Phase = 'OUT' | 'IN' | 'DONE';
+
+function phaseOf(record: AttendanceRecord | undefined): Phase {
+  if (!record?.checkIn) return 'OUT';
+  return record.checkOut ? 'DONE' : 'IN';
+}
+
 export function AttendanceBoard() {
-  const [records, setRecords] = useState<AttendanceRecord[]>(seed);
-  // The team board lists the signed-in user too, so the names come from the
-  // profile store rather than the fixture.
+  // Read from the store so a check-in survives navigating away and reloading.
+  // This board used to hold its own copy, and said so in the UI: "Kept in this
+  // session only".
+  const { attendance, punchIn, punchOut, activeUserId } = useWorkspace();
   const people = useDirectory();
   const today = localDayKey(new Date());
 
-  const todayRecord = records.find(
-    (record) => record.userId === currentUser.id && record.date === today,
+  const todayRecord = useMemo(
+    () => attendance.find((record) => record.userId === activeUserId && record.date === today),
+    [attendance, activeUserId, today],
   );
+
+  const phase = phaseOf(todayRecord);
 
   const history = useMemo(
     () =>
-      records
-        .filter((record) => record.userId === currentUser.id)
+      attendance
+        .filter((record) => record.userId === activeUserId)
         .sort((a, b) => b.date.localeCompare(a.date)),
-    [records],
+    [attendance, activeUserId],
   );
 
   const todayBoard = useMemo(
-    () => records.filter((record) => record.date === today),
-    [records, today],
+    () => attendance.filter((record) => record.date === today),
+    [attendance, today],
   );
 
-  function punchIn() {
-    setRecords((current) => [
-      ...current.filter(
-        (record) => !(record.userId === currentUser.id && record.date === today),
-      ),
-      {
-        id: `at-local-${Date.now()}`,
-        userId: currentUser.id,
-        date: today,
-        checkIn: new Date().toISOString(),
-        checkOut: null,
-        status: 'PRESENT' as const,
-        overtimeMinutes: 0,
-      },
-    ]);
-  }
-
-  function punchOut() {
-    setRecords((current) =>
-      current.map((record) =>
-        record.userId === currentUser.id && record.date === today
-          ? { ...record, checkOut: new Date().toISOString() }
-          : record,
-      ),
-    );
-  }
+  const status = todayRecord
+    ? (STATUSES.find((s) => s.id === todayRecord.status)?.label ?? 'Present')
+    : null;
 
   return (
     <div className="grid-2">
       <SectionCard title="My Attendance">
         <div className="profile-facts" style={{ marginBottom: 14 }}>
           <span>Status</span>
-          <strong>
-            {todayRecord
-              ? (STATUSES.find((s) => s.id === todayRecord.status)?.label ?? 'Present')
-              : 'Not checked in'}
-          </strong>
+          <strong>{status ?? 'Not checked in'}</strong>
         </div>
 
         <div className="profile-facts" style={{ marginBottom: 14 }}>
           <span>Check in</span>
-          <strong>{todayRecord?.checkIn ? formatTime(todayRecord.checkIn) : '\u2014'}</strong>
+          <strong>{todayRecord?.checkIn ? formatTime(todayRecord.checkIn) : '—'}</strong>
         </div>
 
         <div className="profile-facts" style={{ marginBottom: 16 }}>
           <span>Check out</span>
-          <strong>{todayRecord?.checkOut ? formatTime(todayRecord.checkOut) : '\u2014'}</strong>
+          <strong>
+            {todayRecord?.checkOut
+              ? formatTime(todayRecord.checkOut)
+              : todayRecord?.checkIn
+                ? 'in progress'
+                : '—'}
+          </strong>
         </div>
 
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="attendance-actions">
           <button
             className="join"
             type="button"
             onClick={punchIn}
-            disabled={Boolean(todayRecord?.checkIn)}
+            disabled={phase !== 'OUT'}
+            title={phase === 'OUT' ? 'Record your arrival' : 'Already checked in today'}
           >
             <LogIn size={14} /> Check in
           </button>
+
           <button
             className="join"
             type="button"
             onClick={punchOut}
-            disabled={!todayRecord?.checkIn || Boolean(todayRecord?.checkOut)}
+            disabled={phase !== 'IN'}
+            title={phase === 'IN' ? 'Record your departure' : 'Check in first'}
           >
             <LogOut size={14} /> Check out
           </button>
-          <small style={{ color: 'var(--muted)' }}>Kept in this session only</small>
         </div>
+
+        <small className="attendance-hint">
+          {phase === 'OUT' && 'Checking in records the arrival time only.'}
+          {phase === 'IN' && 'Checked in. Checking out will record the departure time.'}
+          {phase === 'DONE' && `Completed for today${todayRecord?.overtimeMinutes ? ` · ${todayRecord.overtimeMinutes}m overtime` : ''}.`}
+        </small>
       </SectionCard>
 
       <SectionCard title="My History">
-        {history.map((record) => {
-          const status = STATUSES.find((s) => s.id === record.status);
-          return (
-            <div className="meeting-row" key={record.id}>
-              <span className="time is-date">{formatDayLabel(record.date)}</span>
-              <div className="meeting-info">
-                <strong>{status?.label ?? record.status}</strong>
-                <small>
-                  {record.checkIn ? formatTime(record.checkIn) : '\u2014'} &rarr;{' '}
-                  {record.checkOut ? formatTime(record.checkOut) : 'in progress'}
-                </small>
+        {history.length === 0 ? (
+          <div className="empty-state">
+            <span className="empty-icon">
+              <Clock3 size={22} />
+            </span>
+            <p>No attendance recorded</p>
+            <span className="empty-meta">Check in to start today's record</span>
+          </div>
+        ) : (
+          history.map((record) => {
+            const row = STATUSES.find((s) => s.id === record.status);
+            return (
+              <div className="meeting-row" key={record.id}>
+                <span className="time is-date">{formatDayLabel(record.date)}</span>
+                <div className="meeting-info">
+                  <strong>{row?.label ?? record.status}</strong>
+                  <small>
+                    {record.checkIn ? formatTime(record.checkIn) : '—'} &rarr;{' '}
+                    {record.checkOut ? formatTime(record.checkOut) : 'in progress'}
+                  </small>
+                </div>
+                {record.overtimeMinutes > 0 && (
+                  <span className="chip active">+{record.overtimeMinutes}m</span>
+                )}
               </div>
-              {record.overtimeMinutes > 0 && (
-                <span className="chip active">+{record.overtimeMinutes}m</span>
-              )}
-            </div>
-          );
-        })}
+            );
+          })
+        )}
       </SectionCard>
 
       <SectionCard title="Today's Team">
         <div className="members">
-            {people.map((person) => {
+          {people.map((person) => {
             const record = todayBoard.find((r) => r.userId === person.id);
+            const isMe = person.id === activeUserId;
+
             return (
               <div className="member" key={person.id}>
                 <PersonAvatar person={person} size="sm" online={person.online} />
                 <div>
-                  <strong>{person.name}</strong>
-                  <small>{record?.checkIn ? `In at ${formatTime(record.checkIn)}` : 'Not checked in'}</small>
+                  <strong>
+                    {person.name}
+                    {isMe && ' (you)'}
+                  </strong>
+                  <small>
+                    {!record?.checkIn
+                      ? 'Not checked in'
+                      : record.checkOut
+                        ? `${formatTime(record.checkIn)} → ${formatTime(record.checkOut)}`
+                        : `In at ${formatTime(record.checkIn)}`}
+                  </small>
                 </div>
                 {record && <span className="chip active">{record.status.toLowerCase()}</span>}
               </div>
@@ -150,16 +178,14 @@ export function AttendanceBoard() {
       </SectionCard>
 
       <SectionCard title="Legend">
-        {STATUSES.map((status) => (
-          <div className="meeting-row" key={status.id}>
-            <span className={`activity-icon ${status.tone}`}>
-              <status.icon size={14} />
+        {STATUSES.map((row) => (
+          <div className="meeting-row" key={row.id}>
+            <span className={`activity-icon ${row.tone}`}>
+              <row.icon size={14} />
             </span>
             <div className="meeting-info">
-              <strong>{status.label}</strong>
-              <small>
-                {todayBoard.filter((r) => r.status === status.id).length} today
-              </small>
+              <strong>{row.label}</strong>
+              <small>{todayBoard.filter((r) => r.status === row.id).length} today</small>
             </div>
           </div>
         ))}

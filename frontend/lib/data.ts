@@ -334,8 +334,13 @@ export const attendance: AttendanceRecord[] = directory.flatMap((person, personI
 
     // setDate rather than subtracting milliseconds, so a DST boundary in the
     // window cannot shift the key onto the wrong day.
+    //
+    // The window starts at *yesterday*, not today. Including today left the
+    // board already checked in on load, which disabled the check-in button
+    // permanently and made the button that matters look broken. Today is now
+    // the signed-in person's to fill in.
     const dayDate = new Date();
-    dayDate.setDate(dayDate.getDate() - dayIndex);
+    dayDate.setDate(dayDate.getDate() - dayIndex - 1);
     const day = localDayKey(dayDate);
 
     return {
@@ -345,10 +350,8 @@ export const attendance: AttendanceRecord[] = directory.flatMap((person, personI
       // Local wall-clock time. Date-only strings would be read as UTC and can
       // land on the wrong day west of Greenwich.
       checkIn: `${day}T${String(checkInHour).padStart(2, '0')}:${String(5 + personIndex * 3).padStart(2, '0')}:00`,
-      checkOut:
-        dayIndex === 0
-          ? null
-          : `${day}T18:${String(10 + personIndex).padStart(2, '0')}:00`,
+      // Every seeded day is in the past, so all of them are closed out.
+      checkOut: `${day}T18:${String(10 + personIndex).padStart(2, '0')}:00`,
       status,
       // Spread across people *and* days so the demo does not show the same
       // overtime figure on every row for one person.

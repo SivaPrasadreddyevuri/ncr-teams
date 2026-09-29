@@ -3883,6 +3883,22 @@ button {
   font-weight: 600;
 }
 
+/* Check in and check out are mutually exclusive by construction, so the pair is
+   laid out as one control group rather than two loose buttons. */
+.attendance-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.attendance-hint {
+  display: block;
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
 .persona-picker {
   display: grid;
   gap: 8px;

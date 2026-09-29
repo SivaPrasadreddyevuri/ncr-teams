@@ -20,6 +20,7 @@ import {
   type Person,
 } from '@/lib/data';
 import { readJson, storageKeys, writeJson } from '@/lib/storage';
+import { localDayKey } from '@/lib/format';
 
 /**
  * The single client-side store for everything that has to outlive a component.
@@ -82,13 +83,6 @@ const seedState: WorkspaceState = {
   files: fileSeed,
 };
 
-function todayKey(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
-    now.getDate(),
-  ).padStart(2, '0')}`;
-}
-
 function minutesOfDay(iso: string): number {
   const date = new Date(iso);
   return date.getHours() * 60 + date.getMinutes();
@@ -149,7 +143,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   );
 
   const punchIn = useCallback(() => {
-    const date = todayKey();
+    const date = localDayKey(new Date());
     const at = new Date().toISOString();
 
     setState((current) => {
@@ -191,7 +185,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const punchOut = useCallback(() => {
-    const date = todayKey();
+    const date = localDayKey(new Date());
     const at = new Date().toISOString();
 
     setState((current) => {
