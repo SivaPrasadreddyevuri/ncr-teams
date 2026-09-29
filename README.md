@@ -1,65 +1,111 @@
-# NCR Teams — UI Prototype
+# NCR Teams
 
-A front-end-only prototype of a Teams-style collaboration workspace. It matches
-the design in `ncr-teams/public/reference.png`: chat, meetings, files, calendar,
-teams, attendance, HR and account screens, all backed by mock data.
+A Microsoft Teams-style collaboration workspace — chat, channels, meetings,
+files, calendar, attendance and HR.
 
-## What this is
+The repository is split into three folders by concern: **`frontend/`** holds the
+app that ships to the browser, **`backend/`** holds the API it will talk to, and
+**[`database/`](./database)** holds the schema that API will use.
 
-**There is no backend.** No database, no API, no authentication, no file
-storage, no realtime connection.
+## Status
 
-- Every screen renders from the fixture module `lib/data.ts`.
-- Interactions (sending a message, checking in, creating a team, joining a
-  meeting) mutate local React state only.
-- A page reload resets everything back to the seeded data.
-- The sign-in screens are visual walkthroughs: any password is accepted and the
-  two-factor code is the fixed `123456`.
+| Folder | State |
+| --- | --- |
+| `frontend/` | **Complete and running.** 22 routes, mock data, no backend. |
+| `backend/` | **Specified only.** The API contract is written down; no code. |
+| `database/` | **Specified only.** The schema is designed; no migrations. |
+
+The frontend is deliberately self-contained today. It reads from an in-memory
+fixture module, so it runs with no services to install and nothing to configure.
+The point of this layout is that when the backend arrives, the swap is confined
+to the data layer rather than rippling through the screens.
 
 ## Running it
 
 ```bash
-npm install
-npm run dev
+npm install     # installs the workspace
+npm run dev     # http://localhost:3000
 ```
 
-`npm run dev` starts on port 3000. If that port is taken, use
-`npm run dev -- -p 3003`.
+If 3000 is taken:
 
 ```bash
-npm run build     # production build
-npm start         # serve the production build
-npm run typecheck # tsc --noEmit
+npm run dev -- -p 3003
 ```
+
+Other scripts: `npm run build`, `npm start`, `npm run typecheck`. They all
+delegate to the `frontend` workspace.
 
 ## Layout
 
-| Path | Purpose |
+```
+.
+├── frontend/                  Next.js 15 App Router, React 19, TypeScript, Tailwind 4
+│   ├── app/                   routing only — one folder per route
+│   │   ├── (app)/             the signed-in shell, 17 routes
+│   │   ├── (auth)/            login, activation, reset, two-factor
+│   │   ├── layout.tsx
+│   │   └── globals.css        the whole design system, no CSS framework
+│   ├── components/            UI, grouped by feature
+│   ├── lib/                   data.ts (fixtures), format.ts, nav.ts
+│   └── ...
+│
+├── backend/                   API service — scaffold only
+│   └── README.md              endpoint contract, realtime protocol, stack
+│
+└── database/                  schema design — scaffold only
+    └── README.md              entities, constraints, conventions, seed plan
+```
+
+This is an npm workspace: one `npm install` at the root covers every package.
+`frontend/` is its own Next.js project because the App Router requires `app/` to
+sit at a project root — it cannot be relocated to an arbitrary depth.
+
+## The frontend
+
+Seventeen authenticated routes plus four auth screens. No backend, no
+authentication, no persistence: every interaction mutates local React state and
+resets on reload.
+
+| Route | What it does |
 | --- | --- |
-| `lib/data.ts` | The whole mock dataset, plus its types |
-| `lib/format.ts` | Date, size and initials helpers (client-safe, no dependencies) |
-| `lib/nav.ts` | Route list, page titles, active-link matching |
-| `app/(app)/` | The signed-in shell and its pages |
-| `app/login`, `/activate`, `/forgot-password`, `/verify-2fa` | Mock auth walkthroughs |
-| `components/` | UI pieces, one folder per feature |
-| `app/globals.css` | The whole design system, no CSS framework |
+| `/` | Dashboard — greeting, stat cards, today's meetings, activity |
+| `/activity` | Combined activity feed and upcoming events |
+| `/apps` | Launcher |
+| `/attendance` | Check in/out, personal history, team board |
+| `/calendar` | Week and month views, 5 or 7 day toggle, event CRUD |
+| `/calls` | Call history and upcoming links |
+| `/channels` | Channel directory grouped by team |
+| `/chat` | Channels, threads, reactions, composer |
+| `/files` | File table, folders, starring, storage meter |
+| `/hr` | Leave approvals, departments, directory |
+| `/meetings` | Meeting list and the in-room experience |
+| `/search` | Ranked search with scope filters and term highlighting |
+| `/settings` | Profile, notifications, appearance, security |
+| `/teams` | Team grid with create and join |
+| `/login`, `/activate`, `/forgot-password`, `/verify-2fa` | Mock auth walkthroughs |
 
-## Routes
+### Conventions worth knowing
 
-`/` · `/activity` · `/apps` · `/attendance` · `/calendar` · `/calls` ·
-`/channels` · `/chat` · `/files` · `/hr` · `/meetings` · `/search` ·
-`/settings` · `/teams`
+- `lib/data.ts` is the single source of demo data. It exports typed fixtures
+  plus its own types, so there is nothing to configure before running.
+- `lib/format.ts` holds pure, dependency-free helpers. It is imported by client
+  components, so it must never pull in a server-only package.
+- `lib/nav.ts` is the route registry. Adding a route means adding one entry.
+- `app/globals.css` carries the design tokens in a Tailwind `@theme` block.
+  `:root` derives its variables from it, so the palette has one source of truth.
+- `@/*` resolves to the `frontend/` root.
 
-## Adding a screen
+## Where this is going
 
-1. Add the fixture to `lib/data.ts`.
-2. Create `app/(app)/<route>/page.tsx` as a server component that reads the
-   fixture and passes it to a client component.
-3. Register the route in `lib/nav.ts` so it appears in the sidebar and topbar.
-4. Reuse existing CSS classes — see the sections in `app/globals.css`.
+The intended next milestone is a real backend, in this order:
 
-## Next step
+1. `database/` — migrations and seed matching the documented entities.
+2. `backend/` — the endpoints in `backend/README.md`, replacing `lib/data.ts`.
+3. Auth and row-level security, so the mock sign-in screens become real.
+4. WebSocket delivery for messages and presence.
+5. File upload to object storage.
 
-The intended next milestone is a real backend to replace `lib/data.ts`. Nothing
-else in the app should need to change: pages already receive plain objects, and
-the mutating handlers are isolated in the client components.
+Nothing above requires a structural change. Pages already receive plain objects,
+and the mutating handlers are isolated in client components, so the data layer
+can be swapped without touching layout or design.

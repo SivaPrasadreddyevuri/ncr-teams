@@ -1,23 +1,23 @@
+# Repo-wide ignores.
+# Frontend-specific Next.js entries live in frontend/.gitignore.
+
 # dependencies
-/node_modules
-/.pnp
-.pnp.js
+node_modules/
+
+# build output
+.next/
+out/
+build/
+dist/
 
 # testing
-/coverage
-
-# next.js
-/.next/
-/out/
-
-# production
-/build
+coverage/
 
 # misc
 .DS_Store
+Thumbs.db
 *.pem
-
-# debug
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -26,12 +26,8 @@ yarn-error.log*
 .env
 .env*.local
 
-# local file storage (uploads)
-storage/
-
-# vercel
+# hosting
 .vercel
 
 # typescript
 *.tsbuildinfo
-next-env.d.ts

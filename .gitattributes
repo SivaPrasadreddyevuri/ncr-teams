@@ -1,0 +1,12 @@
+# Normalise line endings so the same files hash identically across machines.
+* text=auto eol=lf
+
+# Binary-ish assets that must not be touched
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.pdf binary

@@ -1,0 +1,12 @@
+{
+  "name": "@ncr-teams/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "API service for NCR Teams. Scaffold only - no implementation yet. See README.md.",
+  "scripts": {
+    "dev": "echo \"No implementation yet - see backend/README.md\" && exit 1",
+    "build": "echo \"No implementation yet - see backend/README.md\" && exit 1",
+    "start": "echo \"No implementation yet - see backend/README.md\" && exit 1"
+  }
+}
