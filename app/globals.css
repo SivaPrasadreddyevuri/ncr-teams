@@ -1,0 +1,3336 @@
+﻿/* ============================================================
+   NCR Teams - Tailwind layer
+   ============================================================ */
+
+/* Preflight is emitted inside `@layer base`, so every unlayered rule further
+   down this file still wins where the two overlap. That is what lets the
+   legacy CSS and the new utilities coexist during the migration. */
+@import 'tailwindcss';
+
+@theme {
+  /* Surfaces */
+  --color-canvas: #f5f8ff;
+  --color-card: #ffffff;
+  --color-ink: #15223b;
+  --color-muted: #71809b;
+  --color-line: #e3e9f5;
+
+  /* Brand */
+  --color-brand: #168cf0;
+  --color-accent: #8d4dff;
+  --color-brand-soft: #e7f4ff;
+  --color-accent-soft: #f0eaff;
+
+  /* Status tones - background / foreground pairs */
+  --color-tone-blue: #e7f4ff;
+  --color-tone-blue-ink: #1585e9;
+  --color-tone-purple: #f0eaff;
+  --color-tone-purple-ink: #8149ed;
+  --color-tone-pink: #ffeaf3;
+  --color-tone-pink-ink: #e34786;
+  --color-tone-orange: #fff1df;
+  --color-tone-orange-ink: #ee9224;
+  --color-tone-green: #e4f7ec;
+  --color-tone-green-ink: #1f7a41;
+
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    sans-serif;
+
+  /* Referenced by both the sidebar and .main, so it lives in one place. */
+  --spacing-sidebar: 236px;
+}
+
+:root {
+  /* The legacy rules below still read these. Pointing them at the theme keeps a
+     single source of truth -- change a value above and both systems follow. */
+  --bg: var(--color-canvas);
+  --card: var(--color-card);
+  --ink: var(--color-ink);
+  --muted: var(--color-muted);
+  --line: var(--color-line);
+  --blue: var(--color-brand);
+  --purple: var(--color-accent);
+  --gradient: linear-gradient(100deg, #0ea5e9, #8b5cf6);
+  --sidebar-width: var(--spacing-sidebar);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+}
+
+/* Visible to screen readers only. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: 0;
+}
+
+/* ============================================================
+   Application shell
+   ============================================================ */
+
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+.main {
+  margin-left: var(--sidebar-width);
+  flex: 1;
+  min-width: 0;
+}
+
+
+.content {
+  padding: 28px;
+  max-width: 1500px;
+  margin: auto;
+}
+
+/* ============================================================
+   Brand / logo
+   ============================================================ */
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 800;
+  font-size: 20px;
+  padding: 4px 10px 26px;
+}
+
+.brand-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #06a6f6, #6d3cff);
+  display: grid;
+  place-items: center;
+  color: #fff;
+  box-shadow: 0 8px 20px #6d3cff22;
+}
+
+/* ============================================================
+   Sidebar
+   ============================================================ */
+
+.sidebar {
+  width: var(--sidebar-width);
+  background: #fff;
+  border-right: 1px solid var(--line);
+  padding: 22px 14px;
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 10;
+}
+
+/* Scrim behind the mobile drawer. Never interactive when closed. */
+.nav-scrim {
+  position: fixed;
+  inset: 0;
+  background: #0d1b32;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease;
+  z-index: 9;
+}
+
+.nav-scrim.visible {
+  opacity: 0.42;
+  pointer-events: auto;
+}
+
+/* Hamburger, only present on narrow screens. The selector needs two classes
+   because `.icon-btn` is declared later with the same specificity, which
+   would otherwise win on source order and show this on desktop. */
+.icon-btn.nav-toggle {
+  display: none;
+}
+
+
+.sidebar nav {
+  display: grid;
+  gap: 5px;
+}
+
+
+
+
+
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #64728d;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  position: relative;
+}
+
+.nav-item:hover {
+  background: #f5f7fd;
+  color: #243554;
+}
+
+.nav-item.active {
+  background: linear-gradient(90deg, #edf6ff, #f3efff);
+  color: #166ee8;
+  font-weight: 700;
+}
+
+.dot {
+  margin-left: auto;
+  background: #ff5b70;
+  color: #fff;
+  font-size: 12px;
+  min-width: 17px;
+  height: 17px;
+  border-radius: 20px;
+  display: grid;
+  place-items: center;
+}
+
+.sidebar-bottom {
+  margin-top: auto;
+}
+
+.profile-mini {
+  border-top: 1px solid var(--line);
+  margin-top: 14px;
+  padding: 16px 8px 2px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.profile-mini strong,
+.profile-mini small {
+  display: block;
+}
+
+.profile-mini strong {
+  font-size: 14px;
+}
+
+.profile-mini small {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+/* ============================================================
+   Topbar
+   ============================================================ */
+
+.topbar {
+  height: 88px;
+  background: #fff;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 30px;
+  position: sticky;
+  top: 0;
+  z-index: 8;
+}
+
+.topbar-title {
+  min-width: 0;
+  flex: 1;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 25px;
+  line-height: 1.25;
+}
+
+.crumb {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.search {
+  height: 40px;
+  width: 250px;
+  background: #f6f8fc;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  color: #91a0b9;
+}
+
+.search input {
+  border: 0;
+  background: transparent;
+  outline: 0;
+  width: 100%;
+  padding-left: 8px;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.icon-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: none;
+  color: #66748d;
+  display: grid;
+  place-items: center;
+  position: relative;
+  /* Borderless by default, matching the reference. Opt back in with
+     .icon-btn.bordered where a framed control reads better. */
+  border: 1px solid transparent;
+}
+
+.icon-btn:hover {
+  background: #eef3fb;
+  color: var(--ink);
+}
+
+.icon-btn.bordered {
+  background: #fff;
+  border-color: var(--line);
+}
+
+.notification-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f44;
+  position: absolute;
+  right: 8px;
+  top: 7px;
+}
+
+.profile-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  color: #64728d;
+}
+
+/* ============================================================
+   Avatars
+   ============================================================ */
+
+.avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #5bb7ff, #8b5cf6);
+  color: #fff;
+  display: inline-grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 800;
+  position: relative;
+  flex: none;
+}
+
+.avatar-sm {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  font-size: 12px;
+}
+
+.avatar-lg {
+  width: 44px;
+  height: 44px;
+}
+
+.avatar i.online {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid #fff;
+  background: #2bc578;
+  border-radius: 50%;
+}
+
+/* ============================================================
+   Dashboard
+   ============================================================ */
+
+.welcome {
+  border-radius: 20px;
+  padding: 28px;
+  background: radial-gradient(circle at 80% 0, #e8d9ff 0, transparent 32%),
+    linear-gradient(110deg, #e9f8ff, #f7f0ff);
+  border: 1px solid #dce7fb;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  overflow: hidden;
+}
+
+.welcome h2 {
+  font-size: 30px;
+  line-height: 1.2;
+  margin: 0 0 6px;
+}
+
+.welcome p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.welcome-badge {
+  background: #fff9;
+  border: 1px solid #fff;
+  padding: 12px 16px;
+  border-radius: 14px;
+  font-size: 14px;
+  color: #52617c;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin: 18px 0;
+}
+
+.stat-card,
+.section-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 8px 25px #244b7a08;
+}
+
+.stat-card {
+  padding: 17px;
+  display: flex;
+  gap: 13px;
+  align-items: center;
+}
+
+.stat-card strong,
+.stat-card span {
+  display: block;
+}
+
+.stat-card strong {
+  font-size: 25px;
+  line-height: 1.15;
+}
+
+.stat-card > div span {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.stat-icon {
+  width: 42px;
+  height: 42px;
+  flex: none;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+}
+
+.tone-blue {
+  background: #e7f4ff;
+  color: #1585e9;
+}
+
+.tone-purple {
+  background: #f0eaff;
+  color: #8149ed;
+}
+
+.tone-pink {
+  background: #ffeaf3;
+  color: #e34786;
+}
+
+.tone-orange {
+  background: #fff1df;
+  color: #ee9224;
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 16px;
+}
+
+.section-card {
+  padding: 18px;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.section-head h2 {
+  font-size: 16px;
+  margin: 0;
+}
+
+.text-btn {
+  background: transparent;
+  color: #2778ea;
+  font-size: 13px;
+}
+
+.meeting-row,
+.activity-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid #eef1f7;
+}
+
+.meeting-row:last-child,
+.activity-row:last-child {
+  border-bottom: 0;
+}
+
+.time {
+  width: 58px;
+  white-space: nowrap;
+  font-size: 13px;
+  color: #687793;
+  /* Right-aligned against the body so the gap after a short time like "9:00"
+     does not push the title away from it. */
+  text-align: right;
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Day labels ("Tue 29 Sept") are wider than a time and read better on the
+   left, so they get their own measure instead of overflowing the time column. */
+.time.is-date {
+  width: auto;
+  min-width: 96px;
+  text-align: left;
+  font-variant-numeric: normal;
+}
+
+.meeting-info {
+  flex: 1;
+}
+
+.meeting-info strong,
+.meeting-info small {
+  display: block;
+}
+
+.meeting-info strong {
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.meeting-info small {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.join {
+  padding: 7px 14px;
+  border-radius: 8px;
+  background: var(--gradient);
+  color: #fff;
+  font-size: 12px;
+  /* Applied to both <a> and <button>; <button> needs its UA chrome removed or
+     the gradient sits on a grey chrome. */
+  border: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.activity-icon {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 9px;
+  background: #edf3ff;
+  color: #337fe6;
+  display: grid;
+  place-items: center;
+}
+
+/* The info block is the middle child, not the last, so `div:last-child` never
+   matched it and the trailing timestamp hugged the text. Target it directly
+   and let the trailing <small> be pushed to the right edge instead. */
+.activity-row > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.activity-row > small:last-child {
+  flex: none;
+  margin-left: auto;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.activity-row strong,
+.activity-row small {
+  display: block;
+}
+
+.activity-row strong {
+  font-size: 13px;
+}
+
+.activity-row small {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+/* ============================================================
+   Chat
+   ============================================================ */
+
+.page-grid {
+  display: grid;
+  grid-template-columns: 280px 1fr 250px;
+  gap: 14px;
+  height: calc(100vh - 144px);
+  min-height: 620px;
+}
+
+.panel {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.panel-head {
+  min-height: 64px;
+  height: auto;
+  border-bottom: 1px solid var(--line);
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.panel-head strong {
+  font-size: 15px;
+}
+
+.list {
+  padding: 8px;
+}
+
+.conversation {
+  display: flex;
+  gap: 11px;
+  padding: 11px;
+  border-radius: 11px;
+  align-items: center;
+  /* Rendered as a <button>. Without this it shrink-wraps inside .list and
+     paints the UA grey background, which is what made the channel rows
+     ragged and overlapping. */
+  width: 100%;
+  background: none;
+  border: 0;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.conversation.active,
+.conversation:hover {
+  background: #f2f7ff;
+}
+
+.conversation > div:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+
+.conversation strong,
+.conversation small {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conversation strong {
+  font-size: 13px;
+}
+
+.conversation small {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.unread {
+  background: #247be9;
+  color: #fff;
+  border-radius: 10px;
+  padding: 2px 5px;
+  font-size: 12px;
+}
+
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-body {
+  padding: 18px;
+  overflow: auto;
+  flex: 1;
+  background: linear-gradient(#fff, #fbfcff);
+}
+
+.msg {
+  display: flex;
+  gap: 9px;
+  margin: 14px 0;
+}
+
+.msg.mine {
+  flex-direction: row-reverse;
+}
+
+.bubble {
+  max-width: 72%;
+  background: #f1f5fb;
+  border-radius: 14px 14px 14px 4px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.mine .bubble {
+  background: linear-gradient(120deg, #e8f4ff, #f0eaff);
+  border-radius: 14px 14px 4px 14px;
+}
+
+.msg.mine > div {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  max-width: 68%;
+}
+
+.reaction {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 7px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #fff;
+  font-size: 12px;
+  color: #64728d;
+}
+
+.reaction.active {
+  border-color: #9fc6f7;
+  background: #e7f4ff;
+  color: #1585e9;
+}
+
+.bubble-attachment {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 7px;
+  padding: 6px 9px;
+  border-radius: 9px;
+  background: #fff;
+  border: 1px solid var(--line);
+  font-size: 12px;
+  color: #247be9;
+}
+
+.composer {
+  border-top: 1px solid var(--line);
+  padding: 11px;
+  display: flex;
+  gap: 8px;
+}
+
+.composer input {
+  flex: 1;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  outline: 0;
+  font-size: 13px;
+}
+
+.send {
+  background: var(--gradient);
+  color: #fff;
+  border-radius: 9px;
+  width: 38px;
+}
+
+.members {
+  padding: 12px;
+}
+
+.member {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 0;
+}
+
+.member strong {
+  font-size: 13px;
+}
+
+.member small {
+  font-size: 12px;
+  color: #31a36c;
+  display: block;
+}
+
+/* ============================================================
+   Teams
+   ============================================================ */
+
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+
+.team-card {
+  padding: 18px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+}
+
+.team-card .team-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: #f0eaff;
+  color: #7544e7;
+  display: grid;
+  place-items: center;
+}
+
+.team-card h3 {
+  font-size: 15px;
+  margin: 14px 0 5px;
+}
+
+.team-card p {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+}
+
+.team-card .members-line {
+  margin-top: 14px;
+  font-size: 12px;
+  color: #72809a;
+  /* A chip is ~24px and a .join button ~30px. Centring them on a fixed row
+     keeps cards in the same visual row aligned. */
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  gap: 8px;
+}
+
+/* ============================================================
+   Calendar
+   ============================================================ */
+
+.calendar {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.calendar-toolbar {
+  padding: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: 60px repeat(5, 1fr);
+}
+
+.calendar-grid > div {
+  border-right: 1px solid #edf0f6;
+  border-bottom: 1px solid #edf0f6;
+  min-height: 82px;
+  padding: 7px;
+  font-size: 12px;
+}
+
+.event {
+  background: #e8f4ff;
+  border-left: 3px solid #2991f1;
+  padding: 7px;
+  border-radius: 7px;
+  color: #2566a8;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+/* ============================================================
+   Files
+   ============================================================ */
+
+.file-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.file-table th,
+.file-table td {
+  text-align: left;
+  padding: 14px 13px;
+  border-bottom: 1px solid #eef1f6;
+  font-size: 13px;
+}
+
+.file-table th {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.file-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: #f0f5ff;
+  color: #3d7fe4;
+  display: inline-grid;
+  place-items: center;
+  margin-right: 9px;
+  vertical-align: middle;
+}
+
+/* ============================================================
+   Authentication â€” full-screen split layout
+   Left: brand + caption. Right: the form.
+   ============================================================ */
+
+.auth-split {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+  background: #f6f8ff;
+}
+
+/* --- brand panel --- */
+
+.auth-split-brand {
+  position: relative;
+  overflow: hidden;
+  padding: 56px 60px;
+  display: flex;
+  align-items: center;
+  color: #fff;
+  background: linear-gradient(145deg, #0ea5e9 0%, #4f7df5 45%, #8b5cf6 100%);
+}
+
+/* Soft light blooms, echoing the reference artwork. */
+.auth-split-brand::before,
+.auth-split-brand::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.auth-split-brand::before {
+  width: 460px;
+  height: 460px;
+  top: -140px;
+  right: -120px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.3), transparent 65%);
+}
+
+.auth-split-brand::after {
+  width: 520px;
+  height: 520px;
+  bottom: -200px;
+  left: -140px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.18), transparent 62%);
+}
+
+.auth-split-brand-inner {
+  position: relative;
+  z-index: 1;
+  max-width: 460px;
+}
+
+/* The logo sits on a light panel here, so it gets its own treatment. */
+.auth-split-brand .brand {
+  padding: 0 0 44px;
+  color: #fff;
+}
+
+.auth-split-brand .brand-mark {
+  background: rgba(255, 255, 255, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  box-shadow: none;
+  backdrop-filter: blur(6px);
+}
+
+.auth-caption {
+  font-size: 40px;
+  line-height: 1.16;
+  font-weight: 800;
+  letter-spacing: -0.6px;
+  margin: 0 0 20px;
+}
+
+.auth-caption-accent {
+  background: linear-gradient(90deg, #ffe27a, #ffb0e8);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: #ffe27a;
+}
+
+.auth-tagline {
+  font-size: 16px;
+  line-height: 1.65;
+  color: rgba(255, 255, 255, 0.9);
+  margin: 0 0 38px;
+  max-width: 400px;
+}
+
+.auth-features {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+}
+
+.auth-features li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+}
+
+.auth-feature-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.22);
+  flex: none;
+}
+
+.auth-features strong,
+.auth-features small {
+  display: block;
+}
+
+.auth-features strong {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.auth-features small {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.78);
+  margin-top: 2px;
+}
+
+/* --- form panel --- */
+
+.auth-split-form {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 48px 40px;
+  background: radial-gradient(circle at 15% 15%, #e8f8ff, transparent 34%),
+    radial-gradient(circle at 88% 85%, #efe4ff, transparent 36%), #f6f8ff;
+}
+
+.auth-card {
+  width: min(430px, 100%);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 38px 36px;
+  box-shadow: 0 25px 80px #31507a1a;
+}
+
+.auth-mobile-brand {
+  display: none;
+  justify-content: center;
+  padding-bottom: 22px;
+}
+
+.auth-card h1 {
+  text-align: center;
+  font-size: 27px;
+  margin: 0;
+  letter-spacing: -0.3px;
+}
+
+.auth-subtitle {
+  text-align: center;
+  color: var(--muted);
+  font-size: 16px;
+  margin: 9px 0 26px;
+}
+
+.auth-loading {
+  text-align: center;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.auth-security {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 24px 0 0;
+  padding-top: 18px;
+  border-top: 1px solid #eef1f6;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.auth-legal {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.auth-legal a {
+  color: #347fe8;
+  font-weight: 600;
+}
+
+.form-field {
+  margin: 16px 0;
+}
+
+.form-field label {
+  font-size: 15px;
+  font-weight: 700;
+  display: block;
+  margin-bottom: 7px;
+}
+
+.form-field input {
+  width: 100%;
+  height: 46px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  padding: 0 13px;
+  outline: 0;
+  font-size: 16px;
+  background: #fff;
+}
+
+.form-field input:focus {
+  border-color: #9fc6f7;
+  box-shadow: 0 0 0 3px #e7f4ff;
+}
+
+.form-field input:disabled {
+  background: #f6f8fc;
+  color: var(--muted);
+}
+
+.primary {
+  width: 100%;
+  height: 47px;
+  border-radius: 11px;
+  background: var(--gradient);
+  color: #fff;
+  font-weight: 700;
+  font-size: 16px;
+  margin-top: 12px;
+}
+
+.auth-link {
+  display: block;
+  text-align: center;
+  color: #347fe8;
+  font-size: 15px;
+  margin-top: 16px;
+  font-weight: 600;
+}
+
+.code {
+  display: flex;
+  gap: 9px;
+  justify-content: center;
+  margin: 22px 0;
+}
+
+.code input {
+  width: 100%;
+  max-width: 54px;
+  height: 60px;
+  text-align: center;
+  font-size: 28px;
+  font-weight: 700;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  outline: 0;
+  background: #fff;
+}
+
+.code input:focus {
+  border-color: #9fc6f7;
+  box-shadow: 0 0 0 3px #e7f4ff;
+}
+
+/* --- activation steps --- */
+
+.steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 26px;
+}
+
+.step {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.step b {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #eef2f9;
+  color: #7b89a1;
+  font-size: 13px;
+}
+
+.step.active b {
+  background: var(--gradient);
+  color: #fff;
+}
+
+.step.active {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.step-line {
+  width: 24px;
+  height: 1px;
+  background: var(--line);
+}
+
+/* --- password rules --- */
+
+.rules {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 7px;
+}
+
+.rules li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #64728d;
+}
+
+.rules li.ok {
+  color: #2aa56b;
+}
+
+.rules li b {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #eef2f9;
+  color: #9aa7bd;
+  font-size: 12px;
+  flex: none;
+}
+
+.rules li.ok b {
+  background: #e4f8ee;
+  color: #2aa56b;
+}
+
+.pw-meter {
+  display: flex;
+  gap: 5px;
+  margin-top: 9px;
+}
+
+.pw-meter i {
+  height: 4px;
+  flex: 1;
+  border-radius: 4px;
+  background: #eef2f9;
+}
+
+.pw-meter i.on-1 {
+  background: #ef5350;
+}
+
+.pw-meter i.on-2 {
+  background: #f2a33c;
+}
+
+.pw-meter i.on-3 {
+  background: #2bc578;
+}
+
+.recovery-link {
+  display: block;
+  text-align: center;
+  color: #347fe8;
+  font-size: 14px;
+  margin-top: 16px;
+  font-weight: 600;
+}
+
+/* ============================================================
+   Meeting / video call
+   ============================================================ */
+
+.meeting-wrap {
+  position: relative;
+}
+
+.meeting-room {
+  height: calc(100vh - 144px);
+  background: #101522;
+  border-radius: 18px;
+  display: grid;
+  grid-template-columns: 1fr 260px;
+  overflow: hidden;
+}
+
+.video-grid {
+  padding: 16px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.video {
+  background: linear-gradient(145deg, #273246, #111827);
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  position: relative;
+  min-height: 250px;
+}
+
+.video .person {
+  position: absolute;
+  bottom: 10px;
+  left: 12px;
+  background: #0008;
+  border-radius: 6px;
+  padding: 4px 7px;
+  font-size: 12px;
+}
+
+.meeting-side {
+  background: #171d2b;
+  border-left: 1px solid #2b3447;
+  color: #fff;
+  padding: 15px;
+}
+
+.meeting-side h3 {
+  font-size: 15px;
+  margin: 0 0 4px;
+}
+
+.dark-person {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 0;
+}
+
+.dark-person span {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.meeting-controls {
+  position: absolute;
+  bottom: 25px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+}
+
+.control {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #2b3447;
+  color: #fff;
+  display: grid;
+  place-items: center;
+}
+
+.control.leave {
+  background: #ef4d62;
+}
+
+.control.off {
+  background: #ef4d62;
+}
+
+.control.active {
+  background: #247be9;
+}
+
+.control:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.meeting-side-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.meeting-side-tabs button {
+  flex: 1;
+  padding: 7px 0;
+  border-radius: 9px;
+  background: #222b3c;
+  color: #99a5ba;
+  font-size: 13px;
+}
+
+.meeting-side-tabs button.active {
+  background: #2f3a4f;
+  color: #fff;
+  font-weight: 700;
+}
+
+.meeting-chat {
+  max-height: 210px;
+  overflow: auto;
+  display: grid;
+  gap: 9px;
+  padding-right: 4px;
+}
+
+.meeting-chat-row {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.meeting-chat-row strong {
+  display: block;
+  color: #6fa8ff;
+  font-size: 12px;
+}
+
+.meeting-chat-row small {
+  display: block;
+  color: #6c7789;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.meeting-chat-input {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.meeting-chat-input input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  border-radius: 9px;
+  border: 1px solid #2b3447;
+  background: #0f1420;
+  color: #fff;
+  padding: 0 10px;
+  outline: 0;
+  font-size: 13px;
+}
+
+.meeting-chat-input button {
+  width: 34px;
+  border-radius: 9px;
+  background: var(--gradient);
+  color: #fff;
+  display: grid;
+  place-items: center;
+}
+
+.device-picker {
+  position: absolute;
+  right: 18px;
+  bottom: 22px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #171d2b;
+  border: 1px solid #2b3447;
+  border-radius: 12px;
+  padding: 9px 12px;
+  color: #99a5ba;
+}
+
+.device-picker select {
+  background: #0f1420;
+  color: #fff;
+  border: 1px solid #2b3447;
+  border-radius: 8px;
+  padding: 5px 8px;
+  font-size: 12px;
+  max-width: 150px;
+}
+
+.meeting-alert {
+  margin-top: 12px;
+  background: #2a1620;
+  border: 1px solid #59293a;
+  color: #ff9fb0;
+  border-radius: 12px;
+  padding: 11px 14px;
+  font-size: 13px;
+}
+
+.meeting-meta {
+  position: absolute;
+  left: 18px;
+  bottom: 26px;
+  color: #7a8496;
+  font-size: 12px;
+}
+
+/* ============================================================
+   Tab strips
+   Used by the chat list (All / Unread / Groups) and the thread
+   (Chat / Files / Meetings), matching the reference layout.
+   ============================================================ */
+
+.list-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 12px 8px;
+  border-bottom: 1px solid #eef1f6;
+}
+
+.chat-panel > .list-tabs {
+  padding: 8px 16px;
+}
+
+.list-tabs button {
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.list-tabs button:hover {
+  background: #f5f7fd;
+}
+
+.list-tabs button.active {
+  background: #e7f4ff;
+  color: #1585e9;
+}
+
+.unread {
+  background: #247be9;
+  color: #fff;
+  border-radius: 10px;
+  padding: 2px 6px;
+  font-size: 9px;
+  font-weight: 700;
+  flex: none;
+  align-self: center;
+}
+
+/* ============================================================
+   User menu
+   ============================================================ */
+
+.user-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  width: 232px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 18px 45px #244b7a1f;
+  padding: 8px;
+  z-index: 30;
+}
+
+.profile-menu-wrap {
+  position: relative;
+}
+
+/* Transparent full-screen catcher so a click outside closes the menu. */
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+}
+
+.user-menu-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 8px 12px;
+  border-bottom: 1px solid #eef1f6;
+  margin-bottom: 6px;
+}
+
+.user-menu-head strong,
+.user-menu-head small {
+  display: block;
+}
+
+.user-menu-head strong {
+  font-size: 14px;
+}
+
+.user-menu-head small {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.user-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 9px;
+  background: transparent;
+  color: #43536e;
+  font-size: 14px;
+  text-align: left;
+}
+
+.user-menu-item:hover {
+  background: #f5f7fd;
+}
+
+.user-menu-item.danger {
+  color: #d33a4e;
+}
+
+.user-menu-item.danger:hover {
+  background: #fff1f3;
+}
+
+.search-hint {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--muted);
+  box-shadow: 0 12px 30px #244b7a1a;
+  z-index: 30;
+  white-space: nowrap;
+}
+
+/* ============================================================
+   Skeletons
+   One shimmer sweep, reused by every loading state.
+   ============================================================ */
+
+.skeleton {
+  display: block;
+  height: 12px;
+  border-radius: 7px;
+  background: linear-gradient(90deg, #eaeff7 25%, #f4f7fc 50%, #eaeff7 75%);
+  background-size: 300% 100%;
+  animation: skeleton-sweep 1.4s ease-in-out infinite;
+}
+
+.skeleton-circle {
+  border-radius: 50%;
+}
+
+.skeleton-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.skeleton-card {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 17px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+
+.skeleton-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+}
+
+.skeleton-card-body {
+  flex: 1;
+  display: grid;
+  gap: 9px;
+}
+
+.skeleton-stat {
+  height: 78px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background-color: var(--card);
+}
+
+.skeleton-welcome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  border-radius: 20px;
+  padding: 28px;
+  background: linear-gradient(110deg, #e9f8ff, #f7f0ff);
+  border: 1px solid #dce7fb;
+}
+
+.skeleton-rows {
+  margin-top: 16px;
+}
+
+
+
+
+
+
+
+
+.skeleton-table {
+  margin-top: 6px;
+  border-top: 1px solid #eef1f6;
+}
+
+.skeleton-table-row {
+  display: grid;
+  grid-template-columns: 2fr repeat(auto-fit, minmax(60px, 1fr));
+  gap: 14px;
+  align-items: center;
+  padding: 14px 13px;
+  border-bottom: 1px solid #eef1f6;
+}
+
+.skeleton-table-row.head {
+  padding-top: 12px;
+}
+
+.skeleton-event {
+  position: absolute;
+  border-radius: 7px;
+  background: linear-gradient(90deg, #eaeff7 25%, #f4f7fc 50%, #eaeff7 75%);
+  background-size: 300% 100%;
+  animation: skeleton-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton-sweep {
+  0% {
+    background-position: 150% 0;
+  }
+  100% {
+    background-position: -50% 0;
+  }
+}
+
+/* Users who ask for less motion get a static placeholder instead. */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton,
+  .skeleton-event {
+    animation: none;
+    background: #eef2f9;
+  }
+
+  .nav-scrim,
+  .sidebar {
+    transition: none;
+  }
+}
+
+/* ============================================================
+   Horizontally scrollable tables
+   Tables are wide; on narrow screens they scroll inside their own
+   container rather than pushing the page sideways.
+   ============================================================ */
+
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-wrap .file-table {
+  min-width: 560px;
+}
+
+/* ============================================================
+   Type scale
+   Semantic helpers so font sizes live in one place instead of
+   being scattered as inline styles across components.
+   ============================================================ */
+
+.t-xs {
+  font-size: 12px;
+}
+
+.t-sm {
+  font-size: 13px;
+}
+
+.t-base {
+  font-size: 14px;
+}
+
+.t-lg {
+  font-size: 16px;
+}
+
+/* ============================================================
+   Shared form + data primitives
+   ============================================================ */
+
+.table-input {
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0 12px;
+  outline: 0;
+  font-size: 13px;
+  background: #fff;
+  color: var(--ink);
+  min-width: 0;
+  width: 100%;
+}
+
+.table-input:focus {
+  border-color: #9fc6f7;
+  box-shadow: 0 0 0 3px #e7f4ff;
+}
+
+.chip {
+  padding: 5px 11px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: #64728d;
+  font-size: 12px;
+  /* Must be a flex box: preflight makes svg display:block, so an inline chip
+     would break its icon onto a line of its own. */
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.chip.active {
+  background: #e7f4ff;
+  border-color: #9fc6f7;
+  color: #1585e9;
+  font-weight: 700;
+}
+
+.chip.tiny {
+  padding: 2px 7px;
+  font-size: 12px;
+  background: #fff;
+}
+
+.primary:disabled,
+.join:disabled,
+.send:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.file-link {
+  color: inherit;
+  /* Used on <button> for folders; needs the UA background/border stripped. */
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.file-link:hover {
+  color: #247be9;
+  text-decoration: underline;
+}
+
+.avatar-stack {
+  display: flex;
+  margin-top: 12px;
+}
+
+.avatar-stack .avatar {
+  margin-right: -8px;
+  border: 2px solid #fff;
+}
+
+.badge {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.search-page-bar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 18px;
+  max-width: 620px;
+}
+
+.search-page-bar .table-input {
+  height: 42px;
+  font-size: 14px;
+}
+
+.profile-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.profile-facts span,
+.profile-facts strong {
+  display: block;
+}
+
+.profile-facts span {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.profile-facts strong {
+  font-size: 14px;
+  margin-top: 4px;
+  text-transform: capitalize;
+}
+
+.storage-meter {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #eef1f6;
+}
+
+.storage-track {
+  height: 6px;
+  border-radius: 6px;
+  background: #eef2f9;
+  overflow: hidden;
+}
+
+.storage-track i {
+  display: block;
+  height: 100%;
+  background: var(--gradient);
+}
+
+/* ============================================================
+   Calendar (week view)
+   ============================================================ */
+
+.calendar-week {
+  --slot-h: 64px;
+  display: grid;
+  grid-template-columns: 54px repeat(5, 1fr);
+  overflow-x: auto;
+}
+
+.calendar-hours {
+  border-right: 1px solid #edf0f6;
+}
+
+.calendar-hours > div {
+  /* Must match --slot-h exactly. Sizing to content made the ruler roughly
+     half the height of the grid, so no label lined up with its row. */
+  height: var(--slot-h);
+  padding: 6px 8px;
+  text-align: right;
+  font-size: 12px;
+  color: #8490a5;
+  border-bottom: 1px solid #f4f6fa;
+  font-variant-numeric: tabular-nums;
+}
+
+.calendar-day {
+  border-right: 1px solid #edf0f6;
+}
+
+.calendar-day:last-child {
+  border-right: 0;
+}
+
+.calendar-day-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 4px;
+  font-size: 12px;
+  border-bottom: 1px solid #edf0f6;
+  min-height: 34px;
+}
+
+.calendar-day[data-today='true'] .calendar-day-head {
+  background: #f2f8ff;
+}
+
+.today-pill {
+  background: var(--gradient);
+  color: #fff;
+  border-radius: 20px;
+  padding: 1px 7px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.calendar-day-body {
+  position: relative;
+  /* Events are absolutely positioned and sized by duration. Clipping here
+     stops short events from spilling their avatars and actions over the
+     neighbouring one. */
+  overflow: hidden;
+}
+
+.calendar-slot {
+  border-bottom: 1px solid #f4f6fa;
+  height: 64px;
+}
+
+/* Avatars inside an event sit on the last line, so they must not carry the
+   standalone margin -- it pushed them outside the event box. */
+.calendar-event .avatar-stack {
+  margin-top: 0;
+}
+
+.calendar-event .avatar-stack .avatar {
+  width: 19px;
+  height: 19px;
+  font-size: 9px;
+  margin-right: -5px;
+}
+
+.calendar-event {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 2px;
+  overflow: hidden;
+  padding: 5px 6px;
+}
+
+/* Progressive disclosure. A 30-minute slot is ~28px tall and fits a title
+   only; an hour adds the time line; anything longer adds the attendee row.
+   Without this the content overflowed and was clipped mid-line. */
+.calendar-event .ev-detail,
+.calendar-event .ev-foot {
+  display: none;
+}
+
+.calendar-event.tall .ev-detail {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-event.tall .ev-foot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.calendar-event > div:first-child {
+  overflow: hidden;
+}
+
+.calendar-event strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Only reveal the delete affordance on hover, so the grid is not a field of
+   grey boxes. */
+.calendar-event button {
+  opacity: 0;
+  background: #fff;
+  border-radius: 5px;
+  padding: 3px;
+  color: inherit;
+  display: grid;
+  place-items: center;
+}
+
+.calendar-event:hover button,
+.calendar-event button:focus-visible {
+  opacity: 1;
+}
+
+.calendar-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: #64728d;
+}
+
+.calendar-legend .avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+/* ============================================================
+   Empty / placeholder state
+   ============================================================ */
+
+.empty-state {
+  text-align: center;
+  padding: 60px;
+  color: var(--muted);
+}
+
+.empty-state .section-card {
+  max-width: 620px;
+  margin: 0 auto;
+  padding: 48px 34px;
+}
+
+.empty-icon {
+  width: 62px;
+  height: 62px;
+  margin: 0 auto 18px;
+  border-radius: 18px;
+  background: linear-gradient(145deg, #e7f4ff, #f0eaff);
+  color: #6f7ff0;
+  display: grid;
+  place-items: center;
+}
+
+.empty-state h2 {
+  font-size: 20px;
+  margin: 0 0 8px;
+  color: var(--ink);
+}
+
+.empty-state p {
+  font-size: 14px;
+  margin: 0 auto 20px;
+  max-width: 420px;
+  line-height: 1.6;
+}
+
+.empty-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: #f6f8fc;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 7px 14px;
+  font-size: 12px;
+  color: #64728d;
+}
+
+/* ============================================================
+   Responsive
+   ============================================================ */
+
+@media (max-width: 1280px) {
+  /* Tablets and small laptops: the rail gets tighter and the type scale
+     steps down a notch so the dashboard still fits four stat cards. */
+  :root {
+    --sidebar-width: 76px;
+  }
+
+  .sidebar .brand span:last-child,
+  .sidebar .nav-item span,
+  .profile-mini > div:last-child {
+    display: none;
+  }
+
+  .sidebar .brand {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .nav-item {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .cards-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .page-grid {
+    grid-template-columns: 244px 1fr;
+  }
+
+  /* The members panel is the first thing to go when space is tight. */
+  .page-grid > .panel:last-child {
+    display: none;
+  }
+
+  .stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 1024px) {
+  .search {
+    width: 190px;
+  }
+
+  .page-grid {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: 0;
+  }
+
+  /* Convos on top, then the thread; the members panel is already hidden. */
+  .page-grid > .panel:first-child {
+    height: 300px;
+  }
+
+  .chat-panel {
+    min-height: 460px;
+  }
+
+  .grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  /* Stack the auth split: the brand panel would only push the form below the
+     fold, so the compact logo moves into the card instead. */
+  .auth-split {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-split-brand {
+    display: none;
+  }
+
+  .auth-mobile-brand {
+    display: flex;
+  }
+
+  .auth-split-form {
+    padding: 32px 20px;
+  }
+}
+@media (max-width: 760px) {
+  /* Phones. The sidebar becomes a slide-in drawer opened from the topbar's
+     hamburger, rather than disappearing and taking navigation with it. */
+  :root {
+    --sidebar-width: 0px;
+  }
+
+  .icon-btn.nav-toggle {
+    display: grid;
+    flex: none;
+  }
+
+  .sidebar {
+    width: 272px;
+    transform: translateX(-100%);
+    transition: transform 0.24s ease;
+    box-shadow: 0 0 40px #0d1b3233;
+    z-index: 11;
+  }
+
+  .sidebar.drawer-open {
+    transform: translateX(0);
+  }
+
+  /* Inside the drawer the full labels belong, even though the rail is
+     icon-only between 760px and 1280px. */
+  .sidebar .brand span:last-child,
+  .sidebar .nav-item span,
+  .profile-mini > div:last-child {
+    display: block;
+  }
+
+  .sidebar .brand {
+    justify-content: flex-start;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .nav-item {
+    justify-content: flex-start;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .topbar {
+    padding: 0 14px;
+    gap: 10px;
+  }
+
+  .topbar h1 {
+    font-size: 19px;
+  }
+
+  .top-actions .search {
+    display: none;
+  }
+
+  .content {
+    padding: 14px;
+  }
+
+  .stats,
+  .grid-2,
+  .cards-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* The welcome banner stacks so the date badge is not squeezed. */
+  .welcome {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .welcome h2 {
+    font-size: 24px;
+  }
+
+  .page-grid > .panel:first-child {
+    height: 260px;
+  }
+
+  .chat-panel {
+    min-height: 400px;
+  }
+
+  /* Meeting: the side rail stacks *below* the video grid rather than being
+     hidden, so the participant list and meeting chat stay reachable. */
+  .meeting-room {
+    height: auto;
+    grid-template-columns: 1fr;
+  }
+
+  .meeting-side {
+    border-left: 0;
+    border-top: 1px solid #2b3447;
+    max-height: 300px;
+  }
+
+  .video-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .video {
+    min-height: 160px;
+  }
+
+  .meeting-controls {
+    position: static;
+    transform: none;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 16px;
+  }
+
+  .meeting-meta,
+  .device-picker {
+    position: static;
+    transform: none;
+    margin-top: 12px;
+  }
+
+  .device-picker {
+    flex-wrap: wrap;
+  }
+
+  /* Touch targets: 44px is the accepted minimum for finger input. */
+  .icon-btn,
+  .control {
+    width: 44px;
+    height: 44px;
+  }
+
+  .join,
+  .primary {
+    min-height: 44px;
+  }
+
+  .search {
+    width: 100%;
+  }
+
+  /* Calendar keeps its horizontal scroll on phones; five days will not fit. */
+  .calendar-week {
+    grid-template-columns: 46px repeat(5, minmax(96px, 1fr));
+  }
+
+  .auth-card {
+    padding: 28px 22px;
+  }
+
+  .auth-caption {
+    font-size: 32px;
+  }
+}
+
+@media (max-width: 420px) {
+  .stats {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .code input {
+    max-width: 44px;
+    height: 54px;
+    font-size: 21px;
+  }
+}
+
+/* ============================================================
+   UI-only prototype additions
+   Patterns introduced by the mock-data screens. They reuse the
+   variables above rather than introducing new colours.
+   ============================================================ */
+
+/* --- form helpers --- */
+
+.field-wrap {
+  position: relative;
+}
+
+.field-wrap input {
+  width: 100%;
+  height: 46px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  padding: 0 46px 0 13px;
+  outline: 0;
+  font-size: 16px;
+  background: #fff;
+}
+
+.field-wrap input:focus {
+  border-color: #9fc6f7;
+  box-shadow: 0 0 0 3px #e7f4ff;
+}
+
+.field-wrap button {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--muted);
+}
+
+.field-wrap button:hover {
+  background: #f4f7fc;
+  color: var(--ink);
+}
+
+.field-hint {
+  display: block;
+  margin-top: 7px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.auth-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 4px 0 2px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.check input {
+  width: 16px;
+  height: 16px;
+  accent-color: #247be9;
+}
+
+.auth-inline-link {
+  font-size: 14px;
+  font-weight: 600;
+  color: #347fe8;
+}
+
+.auth-hint {
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  margin: 12px 0 0;
+}
+
+.form-error {
+  font-size: 13px;
+  color: #d1343a;
+  background: #fff1f2;
+  border: 1px solid #ffd3d6;
+  border-radius: 10px;
+  padding: 9px 12px;
+  margin: 10px 0 0;
+}
+
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #4a5568;
+  background: #f6f8fc;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 13px 14px;
+  margin: 0;
+}
+
+.notice svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: #247be9;
+}
+
+.auth-submit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.step-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.step-line {
+  width: 26px;
+  height: 2px;
+  background: var(--line);
+}
+
+/* --- two-factor --- */
+
+.qr-block {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.qr-frame {
+  display: inline-grid;
+  place-items: center;
+  width: 132px;
+  height: 132px;
+  border: 1px dashed #c9d6ea;
+  border-radius: 16px;
+  background: #fff;
+  color: #6f7ff0;
+}
+
+.qr-block p {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.55;
+  margin: 12px auto 0;
+  max-width: 260px;
+}
+
+.secret {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.secret code {
+  font-size: 15px;
+  letter-spacing: 0.06em;
+  background: #f4f7fc;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 7px 12px;
+  color: #2c3a52;
+}
+
+.secret button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: var(--muted);
+}
+
+.secret button:hover {
+  background: #f0f4fa;
+  color: var(--ink);
+}
+
+.recovery {
+  margin: 18px 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: #fbfcfe;
+}
+
+.recovery-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 11px;
+}
+
+.recovery-head strong {
+  font-size: 14px;
+}
+
+.recovery-head button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #247be9;
+  padding: 5px 9px;
+  border-radius: 8px;
+}
+
+.recovery-head button:hover {
+  background: #eef5ff;
+}
+
+.codes {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 7px;
+  margin-bottom: 10px;
+}
+
+.codes code {
+  display: block;
+  text-align: center;
+  font-size: 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 4px;
+  color: #2c3a52;
+}
+
+/* --- chat --- */
+
+.reactions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.panel-head strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* --- cards and grids --- */
+
+.add-team {
+  border-style: dashed;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.add-team:hover {
+  border-color: #9fc6f7;
+  background: #fbfdff;
+}
+
+.section-card .meeting-row,
+.section-card .activity-row {
+  margin: 0;
+}
+
+@media (max-width: 760px) {
+  .codes {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================================
+   Search
+   ============================================================ */
+
+.search-page-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  height: 54px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgb(21 34 59 / 4%);
+  max-width: 720px;
+  color: #8494ad;
+}
+
+.search-page-bar:focus-within {
+  border-color: #9fc6f7;
+  box-shadow: 0 0 0 3px #e7f4ff;
+}
+
+.search-page-bar input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: none;
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.search-page-bar input::placeholder {
+  color: #9aa7bd;
+}
+
+.scope-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0 4px;
+}
+
+.scope-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  color: #5b6a86;
+}
+
+.scope-chip:hover {
+  border-color: #b9d5f7;
+  color: var(--ink);
+}
+
+.scope-chip.active {
+  background: #eaf4ff;
+  border-color: #a9d0f8;
+  color: #1668b8;
+}
+
+.scope-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #eef2f9;
+  color: #6b7a94;
+  font-size: 11px;
+  text-align: center;
+}
+
+.scope-chip.active .scope-count {
+  background: #fff;
+  color: #1668b8;
+}
+
+.search-count {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 14px 0 10px;
+}
+
+.result-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.result {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 13px;
+  padding: 13px 15px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.result:hover {
+  border-color: #b9d5f7;
+  box-shadow: 0 2px 8px rgb(21 34 59 / 6%);
+}
+
+.result-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  background: #eef4ff;
+  color: #3a7fd5;
+}
+
+.result-body {
+  min-width: 0;
+}
+
+.result-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.35;
+}
+
+.result-detail {
+  display: block;
+  font-size: 13px;
+  color: #55637e;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.result-context {
+  display: block;
+  font-size: 12px;
+  color: #8a97ae;
+  margin-top: 4px;
+}
+
+.result-time {
+  font-size: 12px;
+  color: #8a97ae;
+  white-space: nowrap;
+  padding-top: 2px;
+}
+
+.result mark {
+  background: #fff2a8;
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+.search-idle {
+  text-align: center;
+  padding: 44px 30px;
+  margin-top: 18px;
+}
+
+.search-idle h2 {
+  font-size: 18px;
+  margin: 0 0 6px;
+  color: var(--ink);
+}
+
+.search-idle p {
+  font-size: 14px;
+  color: var(--muted);
+  margin: 0 0 20px;
+}
+
+.search-suggestions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+.search-suggestions a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: #f8fafd;
+  font-size: 13px;
+  color: #5b6a86;
+}
+
+.search-suggestions a:hover {
+  border-color: #b9d5f7;
+  color: var(--ink);
+}
+
+/* ============================================================
+   Settings
+   ============================================================ */
+
+/* A nav rail plus a form column. The form used to stretch the full page
+   width, which left name fields ~1275px wide -- unusable. */
+.settings {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+
+.settings-nav {
+  display: grid;
+  gap: 2px;
+  position: sticky;
+  top: 0;
+}
+
+.settings-nav button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 13px;
+  border: 0;
+  background: none;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: #5b6a86;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-nav button:hover {
+  background: #eef4fd;
+  color: var(--ink);
+}
+
+.settings-nav button.active {
+  background: #e7f1ff;
+  color: #1668b8;
+}
+
+.settings-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.settings-body {
+  padding: 20px 22px 24px;
+  max-width: 640px;
+}
+
+.settings-body .form-field {
+  margin: 0 0 15px;
+}
+
+/* Auth labels are 15px/700 for a 430px card; on a form this size they shout. */
+.settings-body .form-field label {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: #4a5772;
+}
+
+.settings-body .form-field .table-input {
+  height: 42px;
+}
+
+.settings-identity {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--line);
+  background: #fbfcfe;
+}
+
+.settings-identity strong {
+  display: block;
+  font-size: 15px;
+}
+
+.settings-identity small {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 0;
+  border-bottom: 1px solid #eef1f6;
+}
+
+.settings-row:last-child {
+  border-bottom: 0;
+}
+
+.settings-row strong {
+  display: block;
+  font-size: 14px;
+}
+
+.settings-row small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.settings-row input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--blue);
+  flex: none;
+}
+
+/* A bordered secondary action. `.join` is the gradient call to action, so
+   filters and toggles must not borrow it or they outrank Upload. */
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: #5b6a86;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-secondary:hover {
+  border-color: #b9d5f7;
+  color: var(--ink);
+}
+
+.btn-secondary[aria-pressed='true'] {
+  background: #e7f4ff;
+  border-color: #9fc6f7;
+  color: #1585e9;
+}
+
+.btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ============================================================
+   Files
+   ============================================================ */
+
+.files-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.files-search {
+  position: relative;
+  flex: 1;
+  min-width: 220px;
+  max-width: 340px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  color: #8494ad;
+}
+
+.files-search:focus-within {
+  border-color: #9fc6f7;
+  box-shadow: 0 0 0 3px #e7f4ff;
+}
+
+.files-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.file-table th:nth-child(2),
+.file-table td:nth-child(2) {
+  width: 190px;
+}
+
+.file-table th:nth-child(3),
+.file-table td:nth-child(3) {
+  width: 110px;
+}
+
+.file-table th:nth-child(4),
+.file-table td:nth-child(4) {
+  width: 130px;
+}
+
+.file-table td {
+  vertical-align: middle;
+}
+
+.file-table tbody tr:hover {
+  background: #fbfdff;
+}
+
+/* Light segmented control for toolbars. `.meeting-side-tabs` is a dark-surface
+   component for the meeting room; reusing it on a light surface left the
+   labels dark-on-dark and overlapping. */
+.segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f4f7fc;
+}
+
+.segmented button {
+  border: 0;
+  background: none;
+  padding: 6px 13px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64728d;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.segmented button:hover {
+  color: var(--ink);
+}
+
+.segmented button.active {
+  background: #fff;
+  color: var(--blue);
+  box-shadow: 0 1px 2px rgb(21 34 59 / 8%);
+}
+
+/* --- small structural hooks --- */
+
+.brand-name {
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.sidebar-brand a {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+
+.nav-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-mini-text {
+  min-width: 0;
+}
+
+.skeleton-page {
+  display: block;
+}
+
+.center {
+  text-align: center;
+}
+
+.tone-green {
+  background: #e4f7ec;
+  color: #1f7a41;
+}
+
+.tone-red {
+  background: #fdecec;
+  color: #c4362f;
+}
