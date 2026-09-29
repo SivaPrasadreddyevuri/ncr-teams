@@ -26,7 +26,7 @@ app that ships to the browser, **`backend/`** holds the API it will talk to, and
 
 | Folder | State |
 | --- | --- |
-| `frontend/` | **Complete.** 18 routes, mock data, no backend. |
+| `frontend/` | **Complete.** 19 routes, mock data, no backend. State lives in the browser. |
 | `backend/` | **Specified only.** The API contract is written down; no code. |
 | `database/` | **Specified only.** The schema is designed; no migrations. |
 
@@ -98,13 +98,14 @@ no persistence.
 | `/` | Dashboard — live clock, next-event countdown, greeting, stat cards, today's meetings, activity |
 | `/activity` | Combined activity feed and upcoming events |
 | `/apps` | Launcher |
-| `/attendance` | Check in/out, personal history, team board |
+| `/attendance` | Check in/out with mutually exclusive buttons, history, team board |
+| `/leave` | Submit a leave request with a reason and a from/to window, plus your own history |
+| `/hr` | **HR only** — approval queue, departments, directory |
 | `/calendar` | Day, week and month views, 5 or 7 day toggle, event CRUD |
 | `/calls` | Call history and upcoming links |
 | `/channels` | Channel directory grouped by team |
 | `/chat` | Channels, threads, reactions, composer |
-| `/files` | File table on wide screens, card list on phones, folders, starring, storage meter |
-| `/hr` | Leave approvals, departments, directory |
+| `/files` | File table on wide screens, card list on phones, real uploads, folders, starring, storage meter |
 | `/meetings` | Meeting list and the in-room experience |
 | `/search` | Ranked search with scope filters and term highlighting |
 | `/settings` | Profile photo upload, notifications, appearance, security |
@@ -244,9 +245,94 @@ The photo also replaces the online dot, and the image is clipped by its own
 positioned at `right/bottom: -1px` so it deliberately overhangs, and an overflow
 rule would slice it in half.
 
+## Signing in, and what a role can see
+
+There is no authentication, so the sign-in screen offers a **persona picker**:
+an employee, two managers and the HR administrator. Choosing one is what
+decides the session, and the choice persists across reloads.
+
+This exists because the app cannot demonstrate a second role otherwise. The
+signed-in person used to be hardcoded to `currentUser` inside a *server*
+layout, so every visitor was the same person and every role-based screen was
+unreachable in the state it was designed for.
+
+Two mechanisms, deliberately separate:
+
+- **Nav filtering.** `NavItem.roles` hides `/hr` from anyone who is not an
+  `HR_ADMIN`, along with the dashboard's *Pending requests* stat and the
+  leave entries in the activity feed.
+- **A route guard.** `RoleGate` wraps the HR page, because a missing nav entry
+  stops nobody. Typing `/hr` as an employee shows an access-denied panel
+  linking somewhere useful.
+
+**The guard is not security.** `/hr` is prerendered, so its markup is in the
+public HTML and view-source will show it; the guard only stops the UI from
+rendering. It does at least render a neutral placeholder until the role
+resolves, so HR content does not flash at an employee during hydration. Real
+enforcement means checking the role on the server, which is what the backend
+milestone would add.
+
+## The workspace store
+
+`WorkspaceProvider` owns everything that has to outlive a component: the
+active persona, leave requests, attendance records and file metadata. It
+seeds from `lib/data.ts` and restores from `localStorage` after mount.
+
+Before it existed those were each a local `useState`, which made three
+workflows *impossible* rather than merely unsaved. An employee could not
+submit a leave request that HR would then see, because they were two people on
+two routes holding two copies of the same array — there was no shared value to
+approve. Attendance said so on screen: "Kept in this session only". And the
+signed-in person was fixed in a server layout.
+
+`ProfileProvider` sits inside it and stores a **map keyed by person id**, so
+one persona's edited name and uploaded photo cannot leak onto another's.
+
+Every restore follows the same rule: render the fixture seed so the server HTML
+and the first client paint agree, then read storage in an effect. Reading during
+render would be a hydration mismatch, and nearly every route here is
+prerendered. Writes are gated on the restore having happened, or the seed would
+clobber what was stored.
+
+File *contents* are the exception and live in IndexedDB — see below.
+
+**Uploads store real bytes in IndexedDB.** The Upload button used to be
+disabled with the tooltip "Uploads need a backend". It does not need one to be
+honest about itself: the browser will store a blob. Contents go to IndexedDB and
+metadata to the workspace store, because `localStorage` caps near 5MB *total* and
+base64 inflates bytes by a third — a handful of real documents would exhaust it,
+and the failure mode is an exception on write rather than a gradual decline.
+
+The input carries **no `accept` filter**. Unlike images, an arbitrary file needs
+no decoding, so type genuinely is not a limit here; only size is. The nine
+seeded fixture rows have no bytes behind them, so clicking one says so rather
+than doing nothing, and deleting a row drops its blob so orphans cannot quietly
+consume the quota.
+
+**`STORAGE_QUOTA_BYTES = 50GB` is gone.** It was a hardcoded constant, and the
+moment real bytes landed, a meter claiming 50GB of headroom would have been
+lying about a limit the browser was already enforcing. The meter now reports
+`navigator.storage.estimate()`, exposes itself as a `progressbar`, and says what
+it can when no estimate is available instead of inventing a quota.
+
+**Leave windows are read in `APP_TIME_ZONE`, not the visitor's local zone.**
+`fromAppInputValue` resolves "09:00" the way a calendar event resolves it, so a
+request round-trips to the time that was typed. `new Date(value)` would have
+reinterpreted it in the browser's zone and shifted every request by the
+difference — the same class of bug as the original fixture timezone defect.
+
+**Attendance's two buttons come from one derived phase** (`OUT`, `IN`, `DONE`)
+rather than two `disabled` expressions, which could drift out of agreement.
+Checking in sets only `checkIn`; checking out sets only `checkOut`, and both
+update the existing record rather than deleting and recreating it. Status
+(`LATE` past 09:30) and overtime are derived from the timestamps so neither can
+contradict them.
+
 ## Responsiveness, and how it was checked
-production build in headless Chrome. Two things about that are worth recording,
-because both produced confident false results first.
+
+Every route was verified at 17 widths from 320px to 1600px against a real
+production build in headless Chrome. Three things about that are worth recording,
+because all three produced confident false results first.
 
 **Screenshots alone are not a test, and neither is a document-level check.**
 `document.scrollWidth` reported every page clean while the files list was in fact
@@ -256,14 +342,21 @@ that matters is whether content **escapes the viewport** — measure
 `getBoundingClientRect().right` against `documentElement.clientWidth` for every
 element, not scroll widths.
 
-**A passing sweep can be measuring an empty page.** The first run of the improved
-check reported 78 routes clean while the app was failing to load: `next start`
-had been running since before a rebuild and was serving stale chunk hashes, so
-every route threw `ChunkLoadError` and rendered nothing. An empty body has no
-overflow. The sweep now captures `Runtime.consoleAPICalled` and fails on React
-hydration warnings, which is the only way those surface — and the fix is to stop
-the old server, delete `.next`, and rebuild, since a running server caches the
-build manifest in memory.
+**A passing sweep can be measuring an empty page.** An early run reported 78
+routes clean while the app was throwing `ChunkLoadError` and rendering nothing,
+because `next start` was running from before a rebuild and serving stale chunk
+hashes. An empty body has no overflow. The sweep now asserts a known element
+exists on every route, and fails on React hydration warnings, which is the only
+channel those surface through. The fix when it happens is to stop the old
+server, delete `.next`, and rebuild — a running server caches the build manifest
+in memory.
+
+**A failing assertion is not automatically an app bug.** Two were bad tests: one
+asserted a zero-padded `09:00` while `en-GB` correctly renders `9:00` for
+`hour: 'numeric'`, and another hardcoded 41 bytes for a JSON fixture that is 37.
+The first was worth chasing, because relaxing it revealed midnight rendering as
+`0:00`. The second was not, and now compares against the bytes on disk. When one
+fails, work out which it is before changing the app.
 
 **`--window-size` does not work on Windows.** `chrome --headless --window-size`
 clamps and crops, so a 375px run silently measured something wider. The numbers
