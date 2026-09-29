@@ -2082,24 +2082,9 @@ button {
   text-transform: capitalize;
 }
 
-.storage-meter {
-  margin-top: 18px;
-  padding-top: 14px;
-  border-top: 1px solid #eef1f6;
-}
-
-.storage-track {
-  height: 6px;
-  border-radius: 6px;
-  background: #eef2f9;
-  overflow: hidden;
-}
-
-.storage-track i {
-  display: block;
-  height: 100%;
-  background: var(--gradient);
-}
+/* Storage meter styles now live with the component that renders them, in the
+   files block further down. The old `.storage-meter` / `.storage-track` pair is
+   gone: it backed a hardcoded 50GB figure and a non-semantic `<i>` bar. */
 
 /* ============================================================
    Calendar (week view)
@@ -3824,6 +3809,78 @@ button {
   display: flex;
   gap: 6px;
   flex: none;
+}
+
+/* Files upload. The whole page is a drop target, so files can be dragged in
+   without aiming at a button. */
+.files-zone {
+  border-radius: 16px;
+  transition: box-shadow 0.15s ease;
+}
+
+.files-zone.is-dragging {
+  box-shadow: 0 0 0 3px #1585e966;
+}
+
+.files-feedback {
+  min-height: 0;
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.files-feedback:empty {
+  min-height: 0;
+  margin: 0;
+}
+
+.files-error {
+  color: #c0392b;
+}
+
+.files-notice {
+  color: #2ea043;
+}
+
+/* Real browser usage, not a hardcoded quota. */
+.storage-meter {
+  margin-top: 14px;
+  padding: 14px 16px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+
+.storage-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.storage-meter .meter {
+  height: 7px;
+  border-radius: 6px;
+  background: #eaf0f8;
+  overflow: hidden;
+}
+
+.storage-meter .meter span {
+  display: block;
+  height: 100%;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #5bb7ff, #8b5cf6);
+  transition: width 0.2s ease;
+}
+
+.storage-value {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--ink);
+  font-weight: 600;
 }
 
 .persona-picker {

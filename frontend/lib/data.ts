@@ -290,6 +290,14 @@ export type FileRow = {
   type: string;
   folder?: boolean;
   starred?: boolean;
+  /**
+   * Set on rows this browser actually uploaded.
+   *
+   * The seeded fixtures have no bytes behind them -- they are display data --
+   * so a click on one has nothing to open. Marking the difference keeps an
+   * unopenable file from looking like a broken button.
+   */
+  uploaded?: boolean;
 };
 
 export const files: FileRow[] = [
@@ -303,8 +311,6 @@ export const files: FileRow[] = [
   { id: 'f8', name: 'api-spec.md', size: 84_000, createdAt: relativeIso(600), team: 'Engineering', type: 'doc' },
   { id: 'f9', name: 'release-notes.md', size: 42_000, createdAt: relativeIso(900), team: 'Engineering', type: 'doc' },
 ];
-
-export const STORAGE_QUOTA_BYTES = 50 * 1024 * 1024 * 1024;
 
 /* ------------------------------------------------------------------ */
 /* Attendance, leave, activity                                         */
