@@ -25,6 +25,12 @@ export type Person = {
   phone: string;
   online: boolean;
   bio: string;
+  /**
+   * Optional on purpose: it is required for exactly one person (the signed-in
+   * user, set by uploading a photo) and a required field would force it into
+   * all nine Person literals below for no benefit.
+   */
+  avatarUrl?: string;
 };
 
 export const currentUser: Person = {

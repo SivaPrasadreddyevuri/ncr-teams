@@ -4,8 +4,8 @@ import { useState, type FormEvent } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { Bell, Search, Plus, ChevronDown, LogOut, Menu, X } from 'lucide-react';
-import { Avatar } from './Avatar';
-import { initials } from '@/lib/format';
+import { PersonAvatar } from '@/components/profile/PersonAvatar';
+import { useResolvedPerson } from '@/components/profile/ProfileProvider';
 import { titleForPath } from '@/lib/nav';
 import { useNav } from './nav/NavProvider';
 import type { Person } from '@/lib/data';
@@ -14,6 +14,8 @@ export function Topbar({ user }: { user: Person }) {
   const router = useRouter();
   const pathname = usePathname();
   const { isOpen, toggle } = useNav();
+  // Resolved from the local profile so a rename in Settings reaches the menu.
+  const me = useResolvedPerson(user);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -78,7 +80,7 @@ export function Topbar({ user }: { user: Person }) {
             aria-expanded={menuOpen}
             aria-haspopup="menu"
           >
-            <Avatar initials={initials(user.name)} size="sm" />
+            <PersonAvatar person={user} size="sm" />
             <ChevronDown size={15} />
           </button>
 
@@ -91,10 +93,10 @@ export function Topbar({ user }: { user: Person }) {
               />
               <div className="user-menu" role="menu">
                 <div className="user-menu-head">
-                  <Avatar initials={initials(user.name)} size="sm" />
+                  <PersonAvatar person={user} size="sm" />
                   <div>
-                    <strong>{user.name}</strong>
-                    <small>{user.jobTitle ?? user.role}</small>
+                    <strong>{me?.name}</strong>
+                    <small>{me?.jobTitle ?? me?.role}</small>
                   </div>
                 </div>
 

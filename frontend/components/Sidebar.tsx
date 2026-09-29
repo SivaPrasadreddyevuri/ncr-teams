@@ -3,8 +3,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Logo } from './Logo';
-import { Avatar } from './Avatar';
-import { initials } from '@/lib/format';
+import { PersonAvatar } from '@/components/profile/PersonAvatar';
+import { useResolvedPerson } from '@/components/profile/ProfileProvider';
 import { NAV_ITEMS, isActivePath, type NavItem } from '@/lib/nav';
 import { useNav } from './nav/NavProvider';
 import type { Person } from '@/lib/data';
@@ -32,6 +32,9 @@ function NavRow({ item, active, onNavigate }: NavRow) {
 export function Sidebar({ user }: { user: Person }) {
   const pathname = usePathname();
   const { isOpen, close } = useNav();
+  // The name and job title come from the local profile, not from the `user`
+  // prop, so an edit made in Settings actually shows up here.
+  const me = useResolvedPerson(user);
 
   const navigate = () => {
     if (isOpen) close();
@@ -69,10 +72,10 @@ export function Sidebar({ user }: { user: Person }) {
 
         <div className="sidebar-bottom">
           <div className="profile-mini">
-            <Avatar initials={initials(user.name)} size="sm" />
+            <PersonAvatar person={user} size="sm" />
             <div className="profile-mini-text">
-              <strong>{user.name}</strong>
-              <small>{user.jobTitle ?? user.email}</small>
+              <strong>{me?.name}</strong>
+              <small>{me?.jobTitle ?? me?.email}</small>
             </div>
           </div>
         </div>

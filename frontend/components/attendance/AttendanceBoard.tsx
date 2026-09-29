@@ -2,10 +2,11 @@
 
 import { useMemo, useState } from 'react';
 import { LogIn, LogOut, Clock3, CheckCircle2, Laptop, PieChart, UserX } from 'lucide-react';
-import { Avatar } from '@/components/Avatar';
+import { PersonAvatar } from '@/components/profile/PersonAvatar';
+import { useDirectory } from '@/components/profile/ProfileProvider';
 import { SectionCard } from '@/components/SectionCard';
-import { initials, formatTime, formatDayLabel, localDayKey } from '@/lib/format';
-import { attendance as seed, currentUser, directory, type AttendanceRecord } from '@/lib/data';
+import { formatTime, formatDayLabel, localDayKey } from '@/lib/format';
+import { attendance as seed, currentUser, type AttendanceRecord } from '@/lib/data';
 
 const STATUSES: Array<{ id: AttendanceRecord['status']; label: string; tone: string; icon: typeof Clock3 }> = [
   { id: 'PRESENT', label: 'Present', tone: 'tone-blue', icon: CheckCircle2 },
@@ -17,6 +18,9 @@ const STATUSES: Array<{ id: AttendanceRecord['status']; label: string; tone: str
 
 export function AttendanceBoard() {
   const [records, setRecords] = useState<AttendanceRecord[]>(seed);
+  // The team board lists the signed-in user too, so the names come from the
+  // profile store rather than the fixture.
+  const people = useDirectory();
   const today = localDayKey(new Date());
 
   const todayRecord = records.find(
@@ -129,11 +133,11 @@ export function AttendanceBoard() {
 
       <SectionCard title="Today's Team">
         <div className="members">
-          {directory.map((person) => {
+            {people.map((person) => {
             const record = todayBoard.find((r) => r.userId === person.id);
             return (
               <div className="member" key={person.id}>
-                <Avatar initials={initials(person.name)} size="sm" online={person.online} />
+                <PersonAvatar person={person} size="sm" online={person.online} />
                 <div>
                   <strong>{person.name}</strong>
                   <small>{record?.checkIn ? `In at ${formatTime(record.checkIn)}` : 'Not checked in'}</small>

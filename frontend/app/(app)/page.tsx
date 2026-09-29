@@ -53,8 +53,6 @@ export default function Home() {
 
   return (
     <>
-      <HomeClock events={calendarEvents} />
-
       <div className="welcome">
         <div>
           <h2>
@@ -62,13 +60,15 @@ export default function Home() {
           </h2>
           <p>Here&apos;s what&apos;s happening with your teams today.</p>
         </div>
-        {/* The date is not repeated here: the clock above owns it and updates
-            live, whereas anything rendered in this server component is frozen
-            into the prerendered HTML at build time. */}
+        {/* Rendered here, in a server component, so it is frozen at build time
+            and can name a date that is no longer today. It stays because it is
+            the only date left on the dashboard, but it is a known wart. */}
         <span className="welcome-badge">
           {formatLongDate(now)}
         </span>
       </div>
+
+      <HomeClock events={calendarEvents} />
 
       <div className="stats">
         <StatCard label="New messages" value={String(dashboardStats.messages)} icon={MessageCircle} tone="tone-blue" />

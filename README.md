@@ -107,7 +107,7 @@ no persistence.
 | `/hr` | Leave approvals, departments, directory |
 | `/meetings` | Meeting list and the in-room experience |
 | `/search` | Ranked search with scope filters and term highlighting |
-| `/settings` | Profile, notifications, appearance, security |
+| `/settings` | Profile photo upload, notifications, appearance, security |
 | `/teams` | Team grid with create and join |
 | `/login`, `/activate`, `/forgot-password`, `/verify-2fa` | Mock auth walkthroughs |
 
@@ -159,6 +159,15 @@ prevent, so the phone default is applied in an effect instead. The clock is
 suppressed with `suppressHydrationWarning` and announced to screen readers on a
 30-second cadence rather than every tick, which is unusable to listen to.
 
+It carries a 12h/24h switch, because the viewer who cares that the schedule is
+pinned to IST is often not in IST. One helper renders both so the two paths
+cannot drift: `hours % 12 || 12` maps midnight 0 to 12 and leaves noon alone,
+which `hours % 12` on its own would show as "0:30 PM". The meridiem is omitted in
+24-hour mode, where it is redundant, and the choice persists under
+`ncr-teams:clock-format` — a display preference that silently reset on every
+reload would feel broken. The card shows no date at all: the greeting banner
+above it already carries one.
+
 **Attendance stores a `date`, not a timestamp.** The first build generated
 `DD/MM/YYYY` strings, which `new Date()` cannot parse — every row rendered
 "Invalid Date" *and* the status lookup silently failed, so the whole team showed
@@ -194,9 +203,48 @@ Nothing above requires a structural change. Pages already receive plain objects,
 and the mutating handlers are isolated in client components, so the data layer
 can be swapped without touching layout or design.
 
-## Responsiveness, and how it was checked
+## The profile photo
 
-Every route was verified at 17 widths from 320px to 1600px against a real
+Settings > Profile accepts an image from the local device, by picker or by
+dropping it on the avatar. It is the one place in the app that writes to
+`localStorage`, which introduced two problems worth naming.
+
+**Storage is read in an effect, never during render.** Nearly every route is
+prerendered, so the server has no way to know what is in storage. Reading it in a
+`useState` initialiser would make the first client paint disagree with the server
+HTML — a hydration mismatch. The provider renders `currentUser` and applies the
+stored profile afterwards, so the markup matches first and then updates.
+
+**The image is re-encoded, not stored as-is.** `lib/image.ts` decodes with
+`createImageBitmap`, falls back to an `Image` element for sources the bitmap
+decoder rejects, and redraws to a 256px WebP. A phone photo is 3–8MB and
+`localStorage` caps around 5MB, so the original would throw
+`QuotaExceededError` on the first upload; the re-encoded result is ~15KB, which
+is also far more detail than a 44px avatar can show.
+
+**"All image formats" is not fully achievable and the UI says so.** Browsers
+decode JPEG, PNG, GIF, WebP, AVIF, BMP, SVG and ICO. They do **not** decode
+**HEIC/HEIF** — an iPhone's default, which Chrome and Windows will not display —
+nor TIFF. `accept="image/*"` lets the OS picker offer everything it can, and an
+undecodable file gets an explicit message telling the user to export as JPEG or
+PNG. Covering HEIC properly needs a decoder of several hundred KB, which is a bad
+trade for a prototype.
+
+**One indirection makes it reach everywhere.** `PersonAvatar` reads the profile
+store and renders a photo for the signed-in user, falling through to initials for
+everyone else. It is a *client* component, so a server component can render it,
+which is how the photo reaches the HR and Calls lists without those pages
+becoming client components. The asymmetry to be aware of: those two lists still
+show the **static name**, because a server component cannot read storage. Name
+edits propagate to the sidebar, topbar, chat, meeting room, attendance and leave
+tables, but not to the server-rendered lists.
+
+The photo also replaces the online dot, and the image is clipped by its own
+`border-radius` rather than by `overflow: hidden` on `.avatar` — the dot is
+positioned at `right/bottom: -1px` so it deliberately overhangs, and an overflow
+rule would slice it in half.
+
+## Responsiveness, and how it was checked
 production build in headless Chrome. Two things about that are worth recording,
 because both produced confident false results first.
 

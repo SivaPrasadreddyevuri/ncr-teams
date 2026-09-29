@@ -2,15 +2,19 @@
 
 import { useState } from 'react';
 import { Check, X, Plane } from 'lucide-react';
-import { Avatar } from '@/components/Avatar';
+import { PersonAvatar } from '@/components/profile/PersonAvatar';
+import { useDirectory } from '@/components/profile/ProfileProvider';
 import { SectionCard } from '@/components/SectionCard';
-import { initials, formatDate } from '@/lib/format';
-import { leaveRequests as seed, personById, type LeaveRequest } from '@/lib/data';
+import { formatDate } from '@/lib/format';
+import { leaveRequests as seed, type LeaveRequest } from '@/lib/data';
 
 const TONE = { PENDING: 'tone-orange', APPROVED: 'tone-blue', REJECTED: 'tone-pink' } as const;
 
 export function LeaveTable({ currentUserId }: { currentUserId: string }) {
   const [rows, setRows] = useState<LeaveRequest[]>(seed);
+  // A leave request can belong to the signed-in user, so the requester name is
+  // read from the profile store rather than the static lookup.
+  const people = useDirectory();
 
   function decide(id: string, status: LeaveRequest['status']) {
     setRows((current) =>
@@ -22,10 +26,10 @@ export function LeaveTable({ currentUserId }: { currentUserId: string }) {
     <div className="grid-2">
       <SectionCard title="Leave Requests">
         {rows.map((row) => {
-          const person = personById(row.userId);
+          const person = people.find((p) => p.id === row.userId);
           return (
             <div className="meeting-row" key={row.id}>
-              <Avatar initials={initials(person?.name ?? '?')} size="sm" online={person?.online} />
+              <PersonAvatar person={person} size="sm" online={person?.online} />
               <div className="meeting-info">
                 <strong>{person?.name ?? 'Unknown'}</strong>
                 <small>

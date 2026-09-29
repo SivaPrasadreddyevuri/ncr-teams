@@ -2,9 +2,9 @@
 
 import { useState } from 'react';
 import { Check, User, Bell, Palette, Shield } from 'lucide-react';
-import { Avatar } from '@/components/Avatar';
-import { initials } from '@/lib/format';
-import { currentUser, type Person } from '@/lib/data';
+import { AvatarPicker } from '@/components/profile/AvatarPicker';
+import { useProfile } from '@/components/profile/ProfileProvider';
+import { type Person } from '@/lib/data';
 
 type Tab = 'profile' | 'notifications' | 'appearance' | 'security';
 
@@ -17,7 +17,9 @@ const TABS: Array<{ id: Tab; label: string; icon: typeof User }> = [
 
 export function SettingsPanel() {
   const [tab, setTab] = useState<Tab>('profile');
-  const [profile, setProfile] = useState<Person>(currentUser);
+  // The form edits the shared profile rather than a local copy, so a changed
+  // name reaches the sidebar and topbar instead of stopping at this panel.
+  const { profile, setProfile } = useProfile();
   const [saved, setSaved] = useState(false);
 
   const [notifications, setNotifications] = useState({
@@ -34,6 +36,10 @@ export function SettingsPanel() {
     event.preventDefault();
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  }
+
+  function edit(patch: Partial<Person>) {
+    setProfile(patch);
   }
 
   return (
@@ -56,13 +62,7 @@ export function SettingsPanel() {
       <div className="panel settings-panel">
         {tab === 'profile' && (
           <form onSubmit={save}>
-            <div className="settings-identity">
-              <Avatar initials={initials(profile.name)} size="lg" online={profile.online} />
-              <div>
-                <strong>{profile.name}</strong>
-                <small>{profile.email}</small>
-              </div>
-            </div>
+            <AvatarPicker />
 
             <div className="settings-body">
               <div className="form-field">
@@ -71,7 +71,7 @@ export function SettingsPanel() {
                   id="s-name"
                   className="table-input"
                   value={profile.name}
-                  onChange={(event) => setProfile({ ...profile, name: event.target.value })}
+                  onChange={(event) => edit({ name: event.target.value })}
                 />
               </div>
 
@@ -81,7 +81,7 @@ export function SettingsPanel() {
                   id="s-title"
                   className="table-input"
                   value={profile.jobTitle ?? ''}
-                  onChange={(event) => setProfile({ ...profile, jobTitle: event.target.value })}
+                  onChange={(event) => edit({ jobTitle: event.target.value })}
                 />
               </div>
 
@@ -91,7 +91,7 @@ export function SettingsPanel() {
                   id="s-dept"
                   className="table-input"
                   value={profile.department ?? ''}
-                  onChange={(event) => setProfile({ ...profile, department: event.target.value })}
+                  onChange={(event) => edit({ department: event.target.value })}
                 />
               </div>
 
@@ -102,7 +102,7 @@ export function SettingsPanel() {
                   type="email"
                   className="table-input"
                   value={profile.email}
-                  onChange={(event) => setProfile({ ...profile, email: event.target.value })}
+                  onChange={(event) => edit({ email: event.target.value })}
                 />
               </div>
 
@@ -112,7 +112,7 @@ export function SettingsPanel() {
                   id="s-phone"
                   className="table-input"
                   value={profile.phone}
-                  onChange={(event) => setProfile({ ...profile, phone: event.target.value })}
+                  onChange={(event) => edit({ phone: event.target.value })}
                 />
               </div>
 
@@ -123,7 +123,7 @@ export function SettingsPanel() {
                   className="table-input"
                   rows={3}
                   value={profile.bio}
-                  onChange={(event) => setProfile({ ...profile, bio: event.target.value })}
+                  onChange={(event) => edit({ bio: event.target.value })}
                 />
               </div>
 
@@ -133,7 +133,7 @@ export function SettingsPanel() {
                 </button>
                 {saved && (
                   <span className="chip active">
-                    <Check size={11} /> Updated in this session
+                    <Check size={11} /> Saved in this browser
                   </span>
                 )}
               </div>

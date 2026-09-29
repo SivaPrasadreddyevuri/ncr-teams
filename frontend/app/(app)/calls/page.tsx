@@ -1,8 +1,8 @@
 import { SectionCard } from '@/components/SectionCard';
-import { Avatar } from '@/components/Avatar';
+import { PersonAvatar } from '@/components/profile/PersonAvatar';
 import { PhoneIncoming, PhoneMissed, Clock3 } from 'lucide-react';
 import { calendarEvents, meetings, personById } from '@/lib/data';
-import { formatTime, initials, relativeTime, APP_TIME_ZONE } from '@/lib/format';
+import { formatTime, relativeTime, APP_TIME_ZONE } from '@/lib/format';
 
 export default function CallsPage() {
   const past = [...meetings].sort((a, b) => b.startsAt.localeCompare(a.startsAt)).slice(0, 4);
@@ -20,7 +20,7 @@ export default function CallsPage() {
           const missed = meeting.id === 'mt4';
           return (
             <div className="meeting-row" key={meeting.id}>
-              <Avatar initials={initials(organizer?.name ?? '?')} size="sm" online={organizer?.online} />
+              <PersonAvatar person={organizer} size="sm" online={organizer?.online} />
               <div className="meeting-info">
                 <strong>{meeting.title}</strong>
                 <small>

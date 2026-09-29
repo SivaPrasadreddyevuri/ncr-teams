@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Plus, Trash2, CalendarDays } from 'lucide-react';
-import { Avatar } from '@/components/Avatar';
+import { PersonAvatar } from '@/components/profile/PersonAvatar';
 import {
   APP_TIME_ZONE,
   appDayKey,
@@ -10,7 +10,6 @@ import {
   appZoneOffsetMs,
   formatDayLabel,
   formatTime,
-  initials,
   startOfAppDay,
   weekDays,
   zoneParts,
@@ -283,7 +282,7 @@ export function CalendarWeek({
                             {event.attendeeIds.slice(0, 3).map((id) => {
                               const person = people.find((p) => p.id === id);
                               if (!person) return null;
-                              return <Avatar key={id} initials={initials(person.name)} size="sm" />;
+                              return <PersonAvatar key={id} person={person} size="sm" />;
                             })}
                           </div>
                           <button

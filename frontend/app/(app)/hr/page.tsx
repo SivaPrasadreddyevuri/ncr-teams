@@ -1,7 +1,6 @@
 import { SectionCard } from '@/components/SectionCard';
-import { Avatar } from '@/components/Avatar';
+import { PersonAvatar } from '@/components/profile/PersonAvatar';
 import { currentUser, departments, directory } from '@/lib/data';
-import { initials } from '@/lib/format';
 import { LeaveTable } from '@/components/hr/LeaveTable';
 
 export default function HrPage() {
@@ -26,7 +25,7 @@ export default function HrPage() {
           <div className="members">
             {directory.map((person) => (
               <div className="member" key={person.id}>
-                <Avatar initials={initials(person.name)} size="sm" online={person.online} />
+                <PersonAvatar person={person} size="sm" online={person.online} />
                 <div>
                   <strong>{person.name}</strong>
                   <small>

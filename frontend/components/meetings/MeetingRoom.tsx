@@ -13,23 +13,28 @@ import {
   Settings2,
   Hand,
 } from 'lucide-react';
-import { Avatar } from '@/components/Avatar';
-import { initials, relativeTime } from '@/lib/format';
+import { PersonAvatar } from '@/components/profile/PersonAvatar';
+import { useDirectory } from '@/components/profile/ProfileProvider';
+import { relativeTime } from '@/lib/format';
 import type { Meeting, Person } from '@/lib/data';
 
 type ChatLine = { id: string; authorId: string; body: string; createdAt: string };
 
 export function MeetingRoom({
   meeting,
-  people,
   currentUserId,
   onLeave,
 }: {
   meeting: Meeting;
-  people: Person[];
   currentUserId: string;
   onLeave: () => void;
 }) {
+  // The participant list used to arrive as a `people` prop from a server
+  // component, which meant it was always the static fixture. Reading the
+  // directory through the profile store instead means a rename in Settings
+  // reaches the video tiles, the people panel and the chat log.
+  const resolvedPeople = useDirectory();
+
   const [micOn, setMicOn] = useState(false);
   const [cameraOn, setCameraOn] = useState(true);
   const [sharing, setSharing] = useState(false);
@@ -39,8 +44,9 @@ export function MeetingRoom({
   const [draft, setDraft] = useState('');
 
   const participants = meeting.participantIds
-    .map((id) => people.find((p) => p.id === id))
+    .map((id) => resolvedPeople.find((p) => p.id === id))
     .filter((p): p is Person => Boolean(p));
+
 
   function send(event: React.FormEvent) {
     event.preventDefault();
@@ -61,7 +67,7 @@ export function MeetingRoom({
             const isSelf = person.id === currentUserId;
             return (
               <div className="video" key={person.id}>
-                <Avatar initials={initials(person.name)} size="lg" online={person.online} />
+                <PersonAvatar person={person} size="lg" online={person.online} />
                 <span className="person">
                   {isSelf ? `${person.name} (You)` : person.name}
                   {handRaised && isSelf && <Hand size={12} style={{ marginLeft: 5 }} />}
@@ -102,7 +108,7 @@ export function MeetingRoom({
           {panel === 'people' ? (
             participants.map((person) => (
               <div className="dark-person" key={person.id}>
-                <Avatar initials={initials(person.name)} size="sm" online={person.online} />
+                <PersonAvatar person={person} size="sm" online={person.online} />
                 <span>
                   <strong style={{ display: 'block' }}>
                     {person.name}
@@ -119,7 +125,7 @@ export function MeetingRoom({
                   <p style={{ fontSize: 12, color: '#99a5ba' }}>No messages yet.</p>
                 ) : (
                   lines.map((line) => {
-                    const author = people.find((p) => p.id === line.authorId);
+                    const author = resolvedPeople.find((p) => p.id === line.authorId);
                     return (
                       <div className="meeting-chat-row" key={line.id}>
                         <strong>{author?.name ?? 'Unknown'}</strong>

@@ -5,7 +5,7 @@ import { Video, Clock3 } from 'lucide-react';
 import { MeetingRoom } from './MeetingRoom';
 import { SectionCard } from '@/components/SectionCard';
 import { Avatar } from '@/components/Avatar';
-import { currentUser, meetings, personById, directory } from '@/lib/data';
+import { currentUser, meetings, personById } from '@/lib/data';
 import { formatTime, initials, relativeTime, APP_TIME_ZONE } from '@/lib/format';
 
 export function MeetingsView({ initialRoomId }: { initialRoomId?: string }) {
@@ -17,7 +17,6 @@ export function MeetingsView({ initialRoomId }: { initialRoomId?: string }) {
     return (
       <MeetingRoom
         meeting={room}
-        people={directory}
         currentUserId={currentUser.id}
         onLeave={() => setRoomId(null)}
       />

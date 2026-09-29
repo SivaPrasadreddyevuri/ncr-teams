@@ -386,6 +386,19 @@ button {
   height: 44px;
 }
 
+/* A photo is clipped by its own border-radius rather than by `overflow: hidden`
+   on `.avatar`. The online dot is positioned at right/bottom: -1px so it
+   deliberately overhangs the box, and an overflow rule here would slice it in
+   half. The photo also replaces the dot, so there is nothing to preserve. */
+.avatar > img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+  object-fit: cover;
+  object-position: center;
+}
+
 .avatar i.online {
   position: absolute;
   right: -1px;
@@ -3171,23 +3184,108 @@ button {
   height: 42px;
 }
 
-.settings-identity {
-  display: flex;
-  align-items: center;
-  gap: 14px;
+/* Profile photo picker. Replaces the old read-only `.settings-identity` header:
+   the avatar is now the drop target, and the name and email already have their
+   own fields directly below, so repeating them here was redundant. */
+.avatar-picker {
   padding: 18px 22px;
   border-bottom: 1px solid var(--line);
   background: #fbfcfe;
 }
 
-.settings-identity strong {
+.avatar-picker-drop {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px;
+  margin: -10px;
+  border-radius: 14px;
+  border: 1px dashed transparent;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.avatar-picker-drop:hover,
+.avatar-picker-drop:focus-within {
+  background: #f2f7fe;
+  border-color: #b9d7f8;
+}
+
+.avatar-picker-drop.is-dragging {
+  background: #e7f1ff;
+  border-color: #1585e9;
+}
+
+.avatar-picker-preview {
+  position: relative;
+  flex: none;
+}
+
+.avatar-picker-badge {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #1585e9;
+  color: #fff;
+  border: 2px solid #fff;
+}
+
+.avatar-picker-text {
+  min-width: 0;
+}
+
+.avatar-picker-text strong {
   display: block;
   font-size: 15px;
 }
 
-.settings-identity small {
+.avatar-picker-text small {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.4;
   color: var(--muted);
-  font-size: 13px;
+}
+
+.avatar-picker-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.avatar-picker-actions .btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Reserves no space when empty so the panel does not jump on every render. */
+.avatar-picker-status {
+  min-height: 17px;
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #c0392b;
+}
+
+.avatar-picker-status:empty {
+  min-height: 0;
+  margin: 0;
+}
+
+@media (max-width: 520px) {
+  .avatar-picker {
+    padding: 16px;
+  }
+
+  .avatar-picker-drop {
+    align-items: flex-start;
+  }
 }
 
 .settings-row {
@@ -3486,6 +3584,14 @@ button {
   min-width: 0;
 }
 
+/* The 12h/24h switch sits inside the time cell. Wrapping lets it drop to its
+   own line at 320px rather than pushing the digits and the next-event block
+   sideways, which is how the toolbar bugs in this file started. */
+.home-clock-time {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
 .home-clock-next {
   padding-left: 18px;
   border-left: 1px solid var(--line);
@@ -3526,11 +3632,24 @@ button {
   color: #b3bfd2;
 }
 
-.home-clock-date {
-  display: block;
-  font-size: 13px;
-  color: var(--muted);
-  margin-top: 2px;
+/* AM/PM. The separating space lives in the markup rather than here, so the
+   text is "1:07:39 AM" when copied or read aloud rather than "1:07:39AM". */
+.home-clock-meridiem {
+  margin-left: 2px;
+  font-size: 13px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.06em;
+  color: #8a97ae;
+}
+
+.home-clock-format {
+  flex: none;
+}
+
+.home-clock-format button {
+  padding: 4px 9px;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .home-clock-next > div {
