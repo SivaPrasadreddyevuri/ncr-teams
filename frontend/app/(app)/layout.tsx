@@ -3,6 +3,7 @@ import { Topbar } from '@/components/Topbar';
 import { NavProvider } from '@/components/nav/NavProvider';
 import { ShellTitleProvider } from '@/components/nav/ShellTitle';
 import { ProfileProvider } from '@/components/profile/ProfileProvider';
+import { RouteGate } from '@/components/RouteGate';
 import { WorkspaceProvider } from '@/components/workspace/WorkspaceProvider';
 
 /**
@@ -17,6 +18,10 @@ import { WorkspaceProvider } from '@/components/workspace/WorkspaceProvider';
  * Provider order matters. `WorkspaceProvider` owns the session and the shared
  * records, and `ProfileProvider` reads the active person from it to know whose
  * edits to apply, so workspace has to sit above.
+ *
+ * `RouteGate` wraps the content only, never the chrome: the sidebar and topbar
+ * stay put while a page is "loading", which is the behaviour the route
+ * `loading.tsx` files were always written for.
  */
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -28,7 +33,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <Sidebar />
               <main className="main">
                 <Topbar />
-                <section className="content">{children}</section>
+                <section className="content">
+                  <RouteGate>{children}</RouteGate>
+                </section>
               </main>
             </div>
           </NavProvider>

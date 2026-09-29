@@ -1,4 +1,4 @@
-import { Skeleton, SkeletonPage, SkeletonText } from '@/components/Skeleton';
+import { GenericSkeleton } from '@/components/skeletons';
 
 /**
  * Default loading state for every authenticated route.
@@ -7,36 +7,12 @@ import { Skeleton, SkeletonPage, SkeletonText } from '@/components/Skeleton';
  * sidebar and topbar: navigation paints immediately and only the page body is
  * replaced, instead of the whole viewport flashing.
  *
- * Routes whose layout is distinctive enough to be worth matching ship their own
- * `loading.tsx` (chat, calendar, files, teams).
+ * Every route here is prerendered, so in practice Suspense never suspends and
+ * this file does not fire — `RouteGate` is what makes a loading state visible,
+ * on client-side navigation. This stays because it is the correct mechanism the
+ * moment a route needs real data, and it shares the skeleton definitions rather
+ * than duplicating them.
  */
 export default function Loading() {
-  return (
-    <SkeletonPage label="Loading page">
-      <div className="skeleton-welcome">
-        <div>
-          <Skeleton style={{ height: 26, width: 260 }} />
-          <Skeleton style={{ height: 14, width: 340, marginTop: 12 }} />
-        </div>
-        <Skeleton style={{ height: 40, width: 180 }} />
-      </div>
-
-      <div className="stats">
-        {Array.from({ length: 4 }, (_, index) => (
-          <Skeleton key={index} className="skeleton-stat" />
-        ))}
-      </div>
-
-      <div className="grid-2">
-        <div className="section-card">
-          <Skeleton style={{ height: 15, width: 150 }} />
-          <SkeletonText lines={5} className="skeleton-rows" />
-        </div>
-        <div className="section-card">
-          <Skeleton style={{ height: 15, width: 130 }} />
-          <SkeletonText lines={5} className="skeleton-rows" />
-        </div>
-      </div>
-    </SkeletonPage>
-  );
+  return <GenericSkeleton />;
 }

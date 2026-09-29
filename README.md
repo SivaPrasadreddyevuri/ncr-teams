@@ -328,6 +328,41 @@ update the existing record rather than deleting and recreating it. Status
 (`LATE` past 09:30) and overtime are derived from the timestamps so neither can
 contradict them.
 
+## Loading skeletons — and what they are honestly for
+
+Every route here is prerendered, so **nothing is ever slow and Next's own
+`loading.tsx` never fires.** The skeleton components were already written and
+reachable only through Suspense, which for a static route never suspends — so
+they were complete, well-styled, and invisible.
+
+`RouteGate` makes them visible. It is a client component inside the app layout,
+so the sidebar and topbar paint immediately and only the page body is replaced.
+Three decisions in it are deliberate rather than obvious:
+
+- **A hard load shows no skeleton at all.** The first effect run is skipped, so a
+  refresh paints real content immediately. Holding first paint for three seconds
+  would make the app look slower than it is, and the first impression is the part
+  worth protecting. The distinction leans on `usePathname` changing: a navigation
+  re-renders the gate, a hard load only ever mounts it once.
+- **The real markup stays in the DOM**, `hidden` rather than unmounted. It is
+  still in the static HTML for crawlers and the reveal needs nothing fetched.
+- **Reduced motion shortens the wait to 600ms.** The shimmer is already disabled
+  for those users, so three seconds would mean three seconds of a *static* grey
+  page — strictly worse than the animated one.
+
+Each skeleton mirrors its own screen — the same grid classes, the same column
+count, the same row shapes — and that includes the responsive behaviour. The
+calendar shows one day column on a phone because the live page drops to its day
+view there, and the files skeleton swaps its table for a card list below 640px
+for the same reason. This was not free: the first version rendered desktop shapes
+everywhere and overflowed a 320px viewport on three routes.
+
+**These are a presentation of a loading state, not a performance feature.** The
+app does not need them, because there is nothing to wait for. They exist to
+demonstrate the design, and no route bundles less because of them — `RouteGate` is
+a few hundred bytes on a ~105 kB first load, and code splitting was already
+handled by the router.
+
 ## Responsiveness, and how it was checked
 
 Every route was verified at 17 widths from 320px to 1600px against a real

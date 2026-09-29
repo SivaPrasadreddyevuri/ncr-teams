@@ -3899,6 +3899,86 @@ button {
   color: var(--muted);
 }
 
+/* ============================================================
+   Route loading gate
+   ============================================================ */
+
+/* Wrapper the RouteGate renders the skeleton into. The real page sits in a
+   sibling that is `hidden` while this is on screen, so this element is what
+   gives the content area its height during the wait. */
+.route-skeleton {
+  display: block;
+}
+
+/* A skeleton has to mirror the screen *responsively*, not just on desktop.
+   Each of these three below was measured overflowing a 320px viewport, and all
+   three were unfaithful as well as broken: they showed a layout the live page
+   never uses at that width. */
+
+/* The dashboard's clock strip. A flexible middle column, because fixed bar
+   widths overflowed by 63px at 320. */
+.sk-home-clock {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 16px 20px;
+  margin-bottom: 4px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+
+@media (max-width: 420px) {
+  .sk-home-clock {
+    padding: 14px 16px;
+  }
+}
+
+/* The calendar drops to its one-day view below 760px, so the skeleton shows one
+   day column there rather than a five-column grid that panned off-screen. */
+@media (max-width: 760px) {
+  .sk-calendar-week {
+    grid-template-columns: 54px minmax(0, 1fr);
+  }
+
+  .sk-calendar-week .calendar-day {
+    display: none;
+  }
+
+  .sk-calendar-week .calendar-day:first-of-type {
+    display: block;
+  }
+}
+
+/* The files page swaps its table for a card list below 640px. The skeleton needs
+   both and lets CSS pick, exactly as the live component does. */
+.sk-files-cards {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .sk-files-table {
+    display: none;
+  }
+
+  .sk-files-cards {
+    display: block;
+  }
+}
+
+/* The files toolbar row, mirrored from the live one which stacks on a phone. */
+.sk-files-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+@media (max-width: 640px) {
+  .sk-files-toolbar {
+    display: none;
+  }
+}
+
 .persona-picker {
   display: grid;
   gap: 8px;
