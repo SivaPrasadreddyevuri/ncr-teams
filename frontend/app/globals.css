@@ -3760,6 +3760,72 @@ button {
   min-width: 190px;
 }
 
+/* ============================================================
+   Leave
+   ============================================================ */
+
+/* Two datetime-local inputs sit side by side on wide screens and stack on a
+   phone, where two date pickers side by side are too narrow to be usable. */
+.leave-window {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 560px) {
+  .leave-window {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.leave-submit {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.leave-submit small {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+}
+
+.leave-notice {
+  min-height: 17px;
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: #2ea043;
+}
+
+.leave-notice:empty {
+  min-height: 0;
+  margin: 0;
+}
+
+/* The reason a person gave, wrapped and dimmed so it reads as supporting detail
+   under the date window rather than as another headline. */
+.leave-reason {
+  display: block;
+  color: var(--muted);
+  font-style: italic;
+  overflow-wrap: anywhere;
+}
+
+.leave-queue-note {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.leave-decide {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+
 .persona-picker {
   display: grid;
   gap: 8px;

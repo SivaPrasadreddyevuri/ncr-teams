@@ -139,7 +139,9 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       setState((current) => ({
         ...current,
         leaveRequests: current.leaveRequests.map((row) =>
-          row.id === id ? { ...row, status, decidedById } : row,
+          row.id === id
+            ? { ...row, status, decidedById, decidedAt: new Date().toISOString() }
+            : row,
         ),
       }));
     },

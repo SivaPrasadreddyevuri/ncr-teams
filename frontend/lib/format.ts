@@ -242,6 +242,24 @@ export function formatTime(input: string | Date): string {
   });
 }
 
+/**
+ * Zero-padded 24-hour time, for windows the user typed in.
+ *
+ * `formatTime` is right for a feed row -- "10:00" reads better than "10:00" with
+ * a different width, and en-GB gives it unpadded. But a leave window is input
+ * data, and there `hour: 'numeric'` renders midnight as "0:00", which looks like
+ * a bug rather than a time.
+ */
+export function formatTime24(input: string | Date): string {
+  const date = typeof input === 'string' ? new Date(input) : input;
+  return date.toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: APP_TIME_ZONE,
+  });
+}
+
 export function formatDate(input: string | Date): string {
   const date = typeof input === 'string' ? new Date(input) : input;
   return date.toLocaleDateString('en-GB', { dateStyle: 'medium', timeZone: APP_TIME_ZONE });
@@ -268,6 +286,37 @@ export function formatDayLabel(input: string | Date): string {
     month: 'short',
     timeZone: APP_TIME_ZONE,
   });
+}
+
+/**
+ * `Date` -> the `YYYY-MM-DDTHH:mm` string a `datetime-local` input expects,
+ * read in `APP_TIME_ZONE`.
+ *
+ * Deliberately not the browser's local wall clock. A leave request is a time in
+ * the *workspace's* day, the same as a calendar event, so a person in London
+ * asking for 09:00 leave means 09:00 in the office. Reading the input back with
+ * `new Date(value)` would instead reinterpret it in the visitor's zone and shift
+ * every request by the difference.
+ */
+export function toAppInputValue(date: Date): string {
+  const { year, month, day, hour, minute } = zoneParts(date);
+  return (
+    `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}` +
+    `T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+  );
+}
+
+/**
+ * The inverse: a `datetime-local` value -> the instant it denotes in
+ * `APP_TIME_ZONE`. Returns null for anything unparseable.
+ */
+export function fromAppInputValue(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(value.trim());
+  if (!match) return null;
+
+  const [, year, month, day, hour, minute] = match.map(Number);
+  const instant = zoneWallClockToInstant(year, month, day, hour, minute);
+  return Number.isNaN(instant.getTime()) ? null : instant;
 }
 
 export function formatBytes(bytes: number | bigint): string {

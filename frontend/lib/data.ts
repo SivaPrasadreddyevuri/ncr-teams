@@ -351,16 +351,27 @@ export const attendance: AttendanceRecord[] = directory.flatMap((person, personI
   }),
 );
 
+export const LEAVE_TYPES = ['ANNUAL', 'SICK', 'PERSONAL', 'PARENTAL', 'UNPAID'] as const;
+
+export type LeaveType = (typeof LEAVE_TYPES)[number];
+
 export type LeaveRequest = {
   id: string;
   userId: string;
-  type: string;
+  type: LeaveType | string;
+  /**
+   * Full instants, not bare dates. A request can span a specific window -- "09:00
+   * to 17:00 on the 14th" -- and the form needs the time, so the original
+   * day-only strings were already carrying more than they displayed.
+   */
   from: string;
   to: string;
   days: number;
   reason: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
   decidedById: string | null;
+  /** When the decision was made. Optional: the seed rows predate it. */
+  decidedAt?: string;
 };
 
 export const leaveRequests: LeaveRequest[] = [

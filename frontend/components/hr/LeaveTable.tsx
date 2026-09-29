@@ -5,10 +5,18 @@ import { PersonAvatar } from '@/components/profile/PersonAvatar';
 import { useDirectory } from '@/components/profile/ProfileProvider';
 import { useWorkspace } from '@/components/workspace/WorkspaceProvider';
 import { SectionCard } from '@/components/SectionCard';
-import { formatDate } from '@/lib/format';
+import { formatDayLabel, formatTime24 } from '@/lib/format';
 import type { LeaveRequest } from '@/lib/data';
 
 const TONE = { PENDING: 'tone-orange', APPROVED: 'tone-blue', REJECTED: 'tone-pink' } as const;
+
+/** "Wed 30 Sept, 09:00 → Thu 1 Oct, 17:00" — the window a request covers. */
+function windowFor(row: LeaveRequest): string {
+  const from = new Date(row.from);
+  const to = new Date(row.to);
+
+  return `${formatDayLabel(from)}, ${formatTime24(from)} → ${formatDayLabel(to)}, ${formatTime24(to)}`;
+}
 
 export function LeaveTable() {
   // Read from the store rather than a local copy. That is what makes an
@@ -19,33 +27,54 @@ export function LeaveTable() {
   // store rather than the static lookup.
   const people = useDirectory();
 
+  const pending = leaveRequests.filter((row) => row.status === 'PENDING');
+
   function decide(id: string, status: LeaveRequest['status']) {
     decideLeave(id, status, activeUserId);
   }
 
   return (
     <div className="grid-2">
-      <SectionCard title="Leave Requests">
+      <SectionCard title="Leave Requests" href="/leave">
+        {pending.length > 0 && (
+          <small className="leave-queue-note">
+            {pending.length} waiting on a decision. Only HR can approve or reject.
+          </small>
+        )}
+
         {leaveRequests.map((row) => {
           const person = people.find((p) => p.id === row.userId);
+          const decider = people.find((p) => p.id === row.decidedById);
+
           return (
             <div className="meeting-row" key={row.id}>
               <PersonAvatar person={person} size="sm" online={person?.online} />
               <div className="meeting-info">
-                <strong>{person?.name ?? 'Unknown'}</strong>
+                <strong>
+                  {person?.name ?? 'Unknown'} &bull; {row.days} day{row.days === 1 ? '' : 's'}
+                </strong>
                 <small>
-                  {row.type.toLowerCase()} &bull; {formatDate(row.from)} &rarr; {formatDate(row.to)}{' '}
-                  &bull; {row.reason}
+                  {row.type.charAt(0) + row.type.slice(1).toLowerCase()} &bull; {windowFor(row)}
                 </small>
+                <small className="leave-reason">{row.reason}</small>
+                {decider && (
+                  <small>
+                    {row.status === 'APPROVED' ? 'Approved' : 'Rejected'} by {decider.name}
+                    {row.decidedAt ? ` on ${formatDayLabel(row.decidedAt)}` : ''}
+                  </small>
+                )}
               </div>
+
               <span className="chip">{row.status.toLowerCase()}</span>
+
               {row.status === 'PENDING' && (
-                <div style={{ display: 'flex', gap: 6 }}>
+                <div className="leave-decide">
                   <button
                     className="icon-btn"
                     type="button"
                     onClick={() => decide(row.id, 'APPROVED')}
-                    aria-label={`Approve ${person?.name}'s request`}
+                    aria-label={`Approve ${person?.name ?? 'this'}'s request`}
+                    title="Approve"
                     style={{ color: '#2ea043' }}
                   >
                     <Check size={15} />
@@ -54,7 +83,8 @@ export function LeaveTable() {
                     className="icon-btn"
                     type="button"
                     onClick={() => decide(row.id, 'REJECTED')}
-                    aria-label={`Reject ${person?.name}'s request`}
+                    aria-label={`Reject ${person?.name ?? 'this'}'s request`}
+                    title="Reject"
                     style={{ color: '#e5534b' }}
                   >
                     <X size={15} />
@@ -68,7 +98,9 @@ export function LeaveTable() {
 
       <SectionCard title="Summary">
         {(['PENDING', 'APPROVED', 'REJECTED'] as const).map((status) => {
-          const count = leaveRequests.filter((row) => row.status === status).length;
+          const matching = leaveRequests.filter((row) => row.status === status);
+          const days = matching.reduce((total, row) => total + row.days, 0);
+
           return (
             <div className="meeting-row" key={status}>
               <span className={`activity-icon ${TONE[status]}`}>
@@ -83,7 +115,8 @@ export function LeaveTable() {
               <div className="meeting-info">
                 <strong>{status.toLowerCase()}</strong>
                 <small>
-                  {count} request{count === 1 ? '' : 's'}
+                  {matching.length} request{matching.length === 1 ? '' : 's'} &bull; {days} day
+                  {days === 1 ? '' : 's'}
                 </small>
               </div>
             </div>
