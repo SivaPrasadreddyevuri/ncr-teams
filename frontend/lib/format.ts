@@ -51,18 +51,42 @@ export function parseDayKey(key: string): Date {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Monday-first week containing `anchor`. */
+/** Monday-first week containing `anchor`, in UTC. */
 export function weekDays(anchor: Date, count = 7): Date[] {
-  const day = startOfDay(anchor);
-  const offset = (day.getDay() + 6) % 7;
+  const day = new Date(
+    Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), anchor.getUTCDate()),
+  );
+  const offset = (day.getUTCDay() + 6) % 7;
   const monday = new Date(day.getTime() - offset * DAY_MS);
   return Array.from({ length: count }, (_, i) => new Date(monday.getTime() + i * DAY_MS));
 }
 
+/** Local `YYYY-MM-DD` from the UTC parts of `date`. */
+export function utcDayKey(date: Date): string {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Builds a fixture timestamp whose *UTC* clock reads `hour:minute`.
+ *
+ * This must be UTC rather than `setHours()`, which interprets the argument in
+ * whatever timezone the process happens to run in. Locally that was fine, but
+ * Vercel runs functions in UTC: a standup authored as 10:00 became 10:00 UTC
+ * and then rendered as 15:30 in an Indian browser -- the server HTML and the
+ * hydrated client disagreed, which is a hydration mismatch, not just a shift.
+ *
+ * The paired fix is that every formatter below pins `timeZone: 'UTC'`, so both
+ * sides read the same clock. Attendance deliberately keeps the local helpers
+ * above, because a working day really is the viewer's local day.
+ */
 function daysFromNow(days: number, hour: number, minute = 0): string {
-  const date = new Date(Date.now() + days * DAY_MS);
-  date.setHours(hour, minute, 0, 0);
-  return date.toISOString();
+  const base = new Date(Date.now() + days * DAY_MS);
+  return new Date(
+    Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate(), hour, minute, 0, 0),
+  ).toISOString();
 }
 
 /** "2h ago", "Yesterday", "15 Apr" - compact relative time for feed rows. */
@@ -81,17 +105,22 @@ export function relativeTime(input: string | Date, now = new Date()): string {
   if (days === 1) return 'Yesterday';
   if (days < 7) return `${days}d ago`;
 
-  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 }
 
+/** Fixture times are authored in UTC, so every formatter pins the same zone. */
 export function formatTime(input: string | Date): string {
   const date = typeof input === 'string' ? new Date(input) : input;
-  return date.toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit' });
+  return date.toLocaleTimeString('en-GB', {
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: 'UTC',
+  });
 }
 
 export function formatDate(input: string | Date): string {
   const date = typeof input === 'string' ? new Date(input) : input;
-  return date.toLocaleDateString('en-GB', { dateStyle: 'medium' });
+  return date.toLocaleDateString('en-GB', { dateStyle: 'medium', timeZone: 'UTC' });
 }
 
 export function formatBytes(bytes: number | bigint): string {

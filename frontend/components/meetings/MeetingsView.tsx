@@ -36,6 +36,7 @@ export function MeetingsView({ initialRoomId }: { initialRoomId?: string }) {
                   weekday: 'short',
                   day: 'numeric',
                   month: 'short',
+                  timeZone: 'UTC',
                 })}
               </span>
               <div className="meeting-info">

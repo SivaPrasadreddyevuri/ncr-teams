@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Plus, Trash2, CalendarDays } from 'lucide-react';
 import { Avatar } from '@/components/Avatar';
-import { formatTime, initials, localDayKey, startOfDay, weekDays } from '@/lib/format';
+import { formatTime, initials, utcDayKey, weekDays } from '@/lib/format';
 import type { CalendarEvent, Person } from '@/lib/data';
 
 type View = 'week' | 'month';
@@ -27,26 +27,26 @@ export function CalendarWeek({
   const [dayCount, setDayCount] = useState<5 | 7>(5);
   const [adding, setAdding] = useState(false);
   const [title, setTitle] = useState('');
-  const [dayKey, setDayKey] = useState(() => localDayKey(new Date()));
+  const [dayKey, setDayKey] = useState(() => utcDayKey(new Date()));
 
   const days = useMemo(() => weekDays(anchor, dayCount), [anchor, dayCount]);
-  const todayKey = localDayKey(new Date());
+  const todayKey = utcDayKey(new Date());
 
   const byDay = useMemo(() => {
     const map = new Map<string, CalendarEvent[]>();
     for (const event of events) {
-      const key = localDayKey(new Date(event.startsAt));
+      const key = utcDayKey(new Date(event.startsAt));
       map.set(key, [...(map.get(key) ?? []), event]);
     }
     return map;
   }, [events]);
 
-  const weekLabel = `${days[0].toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} \u2013 ${days[days.length - 1].toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`;
+  const weekLabel = `${days[0].toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })} \u2013 ${days[days.length - 1].toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })}`;
 
   function shift(direction: number) {
     const next = new Date(anchor);
-    if (view === 'week') next.setDate(next.getDate() + direction * 7);
-    else next.setMonth(next.getMonth() + direction);
+    if (view === 'week') next.setUTCDate(next.getUTCDate() + direction * 7);
+    else next.setUTCMonth(next.getUTCMonth() + direction);
     setAnchor(next);
   }
 
@@ -170,12 +170,12 @@ export function CalendarWeek({
         >
           <div className="calendar-hours" />
           {days.map((day) => {
-            const isToday = localDayKey(day) === todayKey;
+            const isToday = utcDayKey(day) === todayKey;
             return (
               <div className="calendar-day" data-today={isToday} key={day.toISOString()}>
                 <div className="calendar-day-head">
-                  <span>{day.toLocaleDateString('en-GB', { weekday: 'short' })}</span>
-                  {isToday ? <span className="today-pill">{day.getDate()}</span> : <span>{day.getDate()}</span>}
+                  <span>{day.toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' })}</span>
+                  {isToday ? <span className="today-pill">{day.getUTCDate()}</span> : <span>{day.getUTCDate()}</span>}
                 </div>
               </div>
             );
@@ -188,7 +188,7 @@ export function CalendarWeek({
           </div>
 
           {days.map((day) => {
-            const key = localDayKey(day);
+            const key = utcDayKey(day);
             return (
               <div className="calendar-day" data-today={key === todayKey} key={`body-${key}`}>
                 <div className="calendar-day-body">
@@ -211,7 +211,7 @@ export function CalendarWeek({
                         key={event.id}
                         style={{
                           position: 'absolute',
-                          top: ((start.getHours() - 8) / 1) * SLOT_H + 2,
+                          top: ((start.getUTCHours() - 8) / 1) * SLOT_H + 2,
                           height,
                           left: 3,
                           right: 3,
@@ -256,11 +256,11 @@ export function CalendarWeek({
           style={{ gridTemplateColumns: `repeat(${days.length}, 1fr)` }}
         >
           {days.map((day) => {
-            const key = localDayKey(day);
+            const key = utcDayKey(day);
             const list = byDay.get(key) ?? [];
             return (
               <div key={key} data-today={key === todayKey}>
-                <strong>{day.getDate()}</strong>
+                <strong>{day.getUTCDate()}</strong>
                 {list.map((event) => (
                   <div className="event" key={event.id} style={{ marginTop: 4 }}>
                     <CalendarDays size={11} /> {event.title}

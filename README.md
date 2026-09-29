@@ -131,6 +131,15 @@ kept resolving to `frontend/lib/format` and **not one import statement needed
 rewriting**. Git recorded the move as renames with 100% similarity. It also
 means `@/app/...` always means the frontend, never the backend.
 
+**Fixture times are UTC on both the server and the client.** The first deployed
+build showed a 10:00 standup at **15:30** for anyone not on UTC. `daysFromNow()`
+called `setHours()`, which interprets its argument in *the process's* timezone —
+fine locally, wrong on Vercel, where functions run in UTC. The server therefore
+emitted 10:00 and the browser re-rendered it as 15:30: a hydration mismatch, not
+just a display shift. Fixtures are now built with `Date.UTC` and every formatter
+pins `timeZone: 'UTC'`, so both sides read the same clock. Attendance keeps the
+local helpers, because a working day genuinely *is* the viewer's local day.
+
 **Attendance stores a `date`, not a timestamp.** The first build generated
 `DD/MM/YYYY` strings, which `new Date()` cannot parse — every row rendered
 "Invalid Date" *and* the status lookup silently failed, so the whole team showed

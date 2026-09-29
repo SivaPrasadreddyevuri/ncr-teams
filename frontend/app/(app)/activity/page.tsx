@@ -75,6 +75,7 @@ export default function ActivityPage() {
                   weekday: 'short',
                   day: 'numeric',
                   month: 'short',
+                  timeZone: 'UTC',
                 })}
               </span>
               <div className="meeting-info">

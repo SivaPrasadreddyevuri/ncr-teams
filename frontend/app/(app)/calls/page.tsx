@@ -48,6 +48,7 @@ export default function CallsPage() {
                   weekday: 'short',
                   day: 'numeric',
                   month: 'short',
+                  timeZone: 'UTC',
                 })}
               </span>
               <div className="meeting-info">
