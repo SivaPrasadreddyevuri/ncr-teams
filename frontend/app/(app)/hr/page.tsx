@@ -1,12 +1,13 @@
 import { SectionCard } from '@/components/SectionCard';
 import { PersonAvatar } from '@/components/profile/PersonAvatar';
-import { currentUser, departments, directory } from '@/lib/data';
+import { RoleGate } from '@/components/workspace/RoleGate';
+import { departments, directory } from '@/lib/data';
 import { LeaveTable } from '@/components/hr/LeaveTable';
 
 export default function HrPage() {
   return (
-    <>
-      <LeaveTable currentUserId={currentUser.id} />
+    <RoleGate roles={['HR_ADMIN']} what="HR tools">
+      <LeaveTable />
 
       <div className="grid-2" style={{ marginTop: 14 }}>
         <SectionCard title="Departments">
@@ -37,6 +38,6 @@ export default function HrPage() {
           </div>
         </SectionCard>
       </div>
-    </>
+    </RoleGate>
   );
 }

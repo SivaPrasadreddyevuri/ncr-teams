@@ -1,31 +1,32 @@
 'use client';
 
-import { useState } from 'react';
 import { Check, X, Plane } from 'lucide-react';
 import { PersonAvatar } from '@/components/profile/PersonAvatar';
 import { useDirectory } from '@/components/profile/ProfileProvider';
+import { useWorkspace } from '@/components/workspace/WorkspaceProvider';
 import { SectionCard } from '@/components/SectionCard';
 import { formatDate } from '@/lib/format';
-import { leaveRequests as seed, type LeaveRequest } from '@/lib/data';
+import type { LeaveRequest } from '@/lib/data';
 
 const TONE = { PENDING: 'tone-orange', APPROVED: 'tone-blue', REJECTED: 'tone-pink' } as const;
 
-export function LeaveTable({ currentUserId }: { currentUserId: string }) {
-  const [rows, setRows] = useState<LeaveRequest[]>(seed);
-  // A leave request can belong to the signed-in user, so the requester name is
-  // read from the profile store rather than the static lookup.
+export function LeaveTable() {
+  // Read from the store rather than a local copy. That is what makes an
+  // employee's request visible here at all: it used to be seeded from a module
+  // fixture, so a request submitted anywhere else in the app could never appear.
+  const { leaveRequests, decideLeave, activeUserId } = useWorkspace();
+  // A request can belong to the signed-in user, so names come from the profile
+  // store rather than the static lookup.
   const people = useDirectory();
 
   function decide(id: string, status: LeaveRequest['status']) {
-    setRows((current) =>
-      current.map((row) => (row.id === id ? { ...row, status, decidedById: currentUserId } : row)),
-    );
+    decideLeave(id, status, activeUserId);
   }
 
   return (
     <div className="grid-2">
       <SectionCard title="Leave Requests">
-        {rows.map((row) => {
+        {leaveRequests.map((row) => {
           const person = people.find((p) => p.id === row.userId);
           return (
             <div className="meeting-row" key={row.id}>
@@ -67,7 +68,7 @@ export function LeaveTable({ currentUserId }: { currentUserId: string }) {
 
       <SectionCard title="Summary">
         {(['PENDING', 'APPROVED', 'REJECTED'] as const).map((status) => {
-          const count = rows.filter((row) => row.status === status).length;
+          const count = leaveRequests.filter((row) => row.status === status).length;
           return (
             <div className="meeting-row" key={status}>
               <span className={`activity-icon ${TONE[status]}`}>

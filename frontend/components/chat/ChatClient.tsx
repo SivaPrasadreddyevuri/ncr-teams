@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { Paperclip, Send, Hash, MessageSquare, X, ChevronLeft } from 'lucide-react';
 import { PersonAvatar } from '@/components/profile/PersonAvatar';
-import { useProfile } from '@/components/profile/ProfileProvider';
+import { useActivePerson } from '@/components/profile/ProfileProvider';
 import { relativeTime } from '@/lib/format';
 import type { Channel, ChatMessage, Person } from '@/lib/data';
 
@@ -35,10 +35,10 @@ export function ChatClient({
   // `people` arrives from a server component, so it is always the static
   // fixture. Overlaying the signed-in user means a rename in Settings shows up
   // in the member list and on your own messages, not just in the sidebar.
-  const { profile } = useProfile();
+  const me = useActivePerson();
   const resolvedPeople = useMemo(
-    () => people.map((person) => (person.id === currentUserId ? profile : person)),
-    [people, profile, currentUserId],
+    () => people.map((person) => (person.id === me.id ? me : person)),
+    [people, me],
   );
 
   // Phones show the thread full width with the channel list as a slide-over,

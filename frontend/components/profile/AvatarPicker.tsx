@@ -5,7 +5,7 @@ import { ImagePlus, Trash2 } from 'lucide-react';
 import { Avatar } from '@/components/Avatar';
 import { ImageError, imageToAvatarDataUrl } from '@/lib/image';
 import { initials } from '@/lib/format';
-import { useProfile } from './ProfileProvider';
+import { useActivePerson, useProfile } from './ProfileProvider';
 
 /**
  * Profile photo picker.
@@ -15,7 +15,8 @@ import { useProfile } from './ProfileProvider';
  * as a file input by a screen reader.
  */
 export function AvatarPicker() {
-  const { profile, setProfile, clearAvatar } = useProfile();
+  const me = useActivePerson();
+  const { setProfile, clearAvatar } = useProfile();
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
@@ -54,7 +55,7 @@ export function AvatarPicker() {
         }}
       >
         <span className="avatar-picker-preview">
-          <Avatar initials={initials(profile.name)} src={profile.avatarUrl} size="lg" />
+          <Avatar initials={initials(me.name)} src={me.avatarUrl} size="lg" />
           <span className="avatar-picker-badge" aria-hidden="true">
             <ImagePlus size={13} />
           </span>
@@ -89,7 +90,7 @@ export function AvatarPicker() {
         <button
           className="btn-secondary"
           type="button"
-          disabled={!profile.avatarUrl || busy}
+          disabled={!me.avatarUrl || busy}
           onClick={clearAvatar}
         >
           <Trash2 size={13} /> Remove photo
@@ -98,7 +99,7 @@ export function AvatarPicker() {
 
       {/* Announced without stealing focus. */}
       <p className="avatar-picker-status" role="status" aria-live="polite">
-        {error ?? (profile.avatarUrl ? 'Photo updated.' : '')}
+        {error ?? (me.avatarUrl ? 'Photo updated.' : '')}
       </p>
     </div>
   );

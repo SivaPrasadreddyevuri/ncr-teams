@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Check, User, Bell, Palette, Shield } from 'lucide-react';
 import { AvatarPicker } from '@/components/profile/AvatarPicker';
-import { useProfile } from '@/components/profile/ProfileProvider';
+import { useActivePerson, useProfile } from '@/components/profile/ProfileProvider';
 import { type Person } from '@/lib/data';
 
 type Tab = 'profile' | 'notifications' | 'appearance' | 'security';
@@ -18,8 +18,10 @@ const TABS: Array<{ id: Tab; label: string; icon: typeof User }> = [
 export function SettingsPanel() {
   const [tab, setTab] = useState<Tab>('profile');
   // The form edits the shared profile rather than a local copy, so a changed
-  // name reaches the sidebar and topbar instead of stopping at this panel.
-  const { profile, setProfile } = useProfile();
+  // name reaches the sidebar and topbar instead of stopping at this panel. It
+  // follows the signed-in persona, so switching users switches the whole form.
+  const me = useActivePerson();
+  const { setProfile } = useProfile();
   const [saved, setSaved] = useState(false);
 
   const [notifications, setNotifications] = useState({
@@ -70,7 +72,7 @@ export function SettingsPanel() {
                 <input
                   id="s-name"
                   className="table-input"
-                  value={profile.name}
+                  value={me.name}
                   onChange={(event) => edit({ name: event.target.value })}
                 />
               </div>
@@ -80,7 +82,7 @@ export function SettingsPanel() {
                 <input
                   id="s-title"
                   className="table-input"
-                  value={profile.jobTitle ?? ''}
+                  value={me.jobTitle ?? ''}
                   onChange={(event) => edit({ jobTitle: event.target.value })}
                 />
               </div>
@@ -90,7 +92,7 @@ export function SettingsPanel() {
                 <input
                   id="s-dept"
                   className="table-input"
-                  value={profile.department ?? ''}
+                  value={me.department ?? ''}
                   onChange={(event) => edit({ department: event.target.value })}
                 />
               </div>
@@ -101,7 +103,7 @@ export function SettingsPanel() {
                   id="s-email"
                   type="email"
                   className="table-input"
-                  value={profile.email}
+                  value={me.email}
                   onChange={(event) => edit({ email: event.target.value })}
                 />
               </div>
@@ -111,7 +113,7 @@ export function SettingsPanel() {
                 <input
                   id="s-phone"
                   className="table-input"
-                  value={profile.phone}
+                  value={me.phone}
                   onChange={(event) => edit({ phone: event.target.value })}
                 />
               </div>
@@ -122,7 +124,7 @@ export function SettingsPanel() {
                   id="s-bio"
                   className="table-input"
                   rows={3}
-                  value={profile.bio}
+                  value={me.bio}
                   onChange={(event) => edit({ bio: event.target.value })}
                 />
               </div>

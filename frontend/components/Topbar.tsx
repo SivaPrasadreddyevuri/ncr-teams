@@ -5,17 +5,26 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { Bell, Search, Plus, ChevronDown, LogOut, Menu, X } from 'lucide-react';
 import { PersonAvatar } from '@/components/profile/PersonAvatar';
-import { useResolvedPerson } from '@/components/profile/ProfileProvider';
+import { useActivePerson } from '@/components/profile/ProfileProvider';
+import { useWorkspace } from '@/components/workspace/WorkspaceProvider';
 import { titleForPath } from '@/lib/nav';
 import { useNav } from './nav/NavProvider';
 import type { Person } from '@/lib/data';
 
-export function Topbar({ user }: { user: Person }) {
+const ROLE_LABEL: Record<Person['role'], string> = {
+  HR_ADMIN: 'HR',
+  MANAGER: 'Manager',
+  EMPLOYEE: 'Employee',
+};
+
+export function Topbar() {
   const router = useRouter();
   const pathname = usePathname();
   const { isOpen, toggle } = useNav();
-  // Resolved from the local profile so a rename in Settings reaches the menu.
-  const me = useResolvedPerson(user);
+  // The signed-in person comes from the workspace store, so switching persona
+  // updates the whole shell, and local profile edits reach the menu.
+  const me = useActivePerson();
+  const { signOut } = useWorkspace();
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -30,8 +39,11 @@ export function Topbar({ user }: { user: Person }) {
     setMenuOpen(false);
   }
 
-  function onSignOut() {
-    // Prototype: there is no session, so this just returns to the login screen.
+  function handleSignOut() {
+    // No real session exists. `signOut` resets the active person so the shell
+    // does not keep rendering the previous one's data, then we return to login.
+    signOut();
+    setMenuOpen(false);
     router.push('/login');
   }
 
@@ -80,7 +92,7 @@ export function Topbar({ user }: { user: Person }) {
             aria-expanded={menuOpen}
             aria-haspopup="menu"
           >
-            <PersonAvatar person={user} size="sm" />
+            <PersonAvatar person={me} size="sm" />
             <ChevronDown size={15} />
           </button>
 
@@ -93,11 +105,16 @@ export function Topbar({ user }: { user: Person }) {
               />
               <div className="user-menu" role="menu">
                 <div className="user-menu-head">
-                  <PersonAvatar person={user} size="sm" />
+                  <PersonAvatar person={me} size="sm" />
                   <div>
-                    <strong>{me?.name}</strong>
-                    <small>{me?.jobTitle ?? me?.role}</small>
+                    <strong>{me.name}</strong>
+                    <small>{me.jobTitle ?? me.role}</small>
                   </div>
+                  {/* The role is what decides which nav items and pages this
+                      person can reach, so it is worth showing explicitly. */}
+                  <span className="chip tiny" style={{ marginLeft: 'auto' }}>
+                    {ROLE_LABEL[me.role]}
+                  </span>
                 </div>
 
                 <Link
@@ -117,7 +134,7 @@ export function Topbar({ user }: { user: Person }) {
                   Security &amp; two-factor
                 </Link>
 
-                <button className="user-menu-item danger" role="menuitem" onClick={onSignOut}>
+                <button className="user-menu-item danger" role="menuitem" onClick={handleSignOut}>
                   <LogOut size={14} /> Sign out
                 </button>
               </div>

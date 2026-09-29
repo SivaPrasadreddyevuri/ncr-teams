@@ -12,8 +12,10 @@ import {
   Grid2X2,
   Settings,
   Radio,
+  Plane,
   type LucideIcon,
 } from 'lucide-react';
+import type { Person } from './data';
 
 export type NavItem = {
   href: string;
@@ -23,6 +25,14 @@ export type NavItem = {
   icon: LucideIcon;
   /** Unread count rendered as a pill in the sidebar. */
   badge?: number;
+  /**
+   * When present, the item is only reachable by these roles.
+   *
+   * Hiding a nav entry is a convenience, not a guard: the page still has to be
+   * blocked, which is what `RoleGate` is for. A link that simply disappears
+   * leaves anyone who types the URL with a working page.
+   */
+  roles?: Person['role'][];
 };
 
 export const NAV_ITEMS: NavItem[] = [
@@ -35,11 +45,23 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/calls', label: 'Calls', title: 'Calls', icon: Phone },
   { href: '/files', label: 'Files', title: 'Files', icon: FolderOpen },
   { href: '/attendance', label: 'Attendance', title: 'Attendance', icon: ClipboardCheck },
-  { href: '/hr', label: 'HR', title: 'HR', icon: BriefcaseBusiness },
+  { href: '/leave', label: 'Leave', title: 'Leave', icon: Plane },
+  {
+    href: '/hr',
+    label: 'HR',
+    title: 'HR',
+    icon: BriefcaseBusiness,
+    roles: ['HR_ADMIN'],
+  },
   { href: '/search', label: 'Search', title: 'Search', icon: Search },
   { href: '/apps', label: 'Apps', title: 'Apps', icon: Grid2X2 },
   { href: '/settings', label: 'Settings', title: 'Settings', icon: Settings },
 ];
+
+/** True when this role may see and open `item`. */
+export function canAccess(item: NavItem, role: Person['role']): boolean {
+  return !item.roles || item.roles.includes(role);
+}
 
 /**
  * Routes that have no sidebar entry but still need a topbar title.
@@ -48,7 +70,6 @@ export const NAV_ITEMS: NavItem[] = [
  */
 const EXTRA_TITLES: Record<string, string> = {
   '/meetings': 'Meetings',
-  '/channels': 'Channels',
   '/verify-2fa': 'Security',
 };
 

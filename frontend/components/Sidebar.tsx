@@ -4,10 +4,10 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Logo } from './Logo';
 import { PersonAvatar } from '@/components/profile/PersonAvatar';
-import { useResolvedPerson } from '@/components/profile/ProfileProvider';
-import { NAV_ITEMS, isActivePath, type NavItem } from '@/lib/nav';
+import { useActivePerson } from '@/components/profile/ProfileProvider';
+import { useWorkspace } from '@/components/workspace/WorkspaceProvider';
+import { NAV_ITEMS, canAccess, isActivePath, type NavItem } from '@/lib/nav';
 import { useNav } from './nav/NavProvider';
-import type { Person } from '@/lib/data';
 
 type NavRow = { item: NavItem; active: boolean; onNavigate: () => void };
 
@@ -29,12 +29,17 @@ function NavRow({ item, active, onNavigate }: NavRow) {
   );
 }
 
-export function Sidebar({ user }: { user: Person }) {
+export function Sidebar() {
   const pathname = usePathname();
   const { isOpen, close } = useNav();
-  // The name and job title come from the local profile, not from the `user`
-  // prop, so an edit made in Settings actually shows up here.
-  const me = useResolvedPerson(user);
+  const { activeUser } = useWorkspace();
+  // The signed-in person, with any local profile edits applied. Read from the
+  // store rather than a prop so switching persona updates the whole shell.
+  const me = useActivePerson();
+
+  // Hidden for a role that cannot use the page. `/hr` is additionally blocked
+  // by RoleGate, because a missing nav entry does not stop anyone typing the URL.
+  const items = NAV_ITEMS.filter((item) => canAccess(item, activeUser.role));
 
   const navigate = () => {
     if (isOpen) close();
@@ -60,7 +65,7 @@ export function Sidebar({ user }: { user: Person }) {
         </div>
 
         <nav>
-          {NAV_ITEMS.map((item) => (
+          {items.map((item) => (
             <NavRow
               key={item.href}
               item={item}
@@ -72,10 +77,10 @@ export function Sidebar({ user }: { user: Person }) {
 
         <div className="sidebar-bottom">
           <div className="profile-mini">
-            <PersonAvatar person={user} size="sm" />
+            <PersonAvatar person={me} size="sm" />
             <div className="profile-mini-text">
-              <strong>{me?.name}</strong>
-              <small>{me?.jobTitle ?? me?.email}</small>
+              <strong>{me.name}</strong>
+              <small>{me.jobTitle ?? me.email}</small>
             </div>
           </div>
         </div>

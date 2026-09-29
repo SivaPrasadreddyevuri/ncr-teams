@@ -19,7 +19,13 @@ const PREFIX = 'ncr-teams:';
 
 export const storageKeys = {
   clockFormat: `${PREFIX}clock-format`,
-  profile: `${PREFIX}profile`,
+  /** Map of personId -> editable profile, so personas do not share edits. */
+  profiles: `${PREFIX}profiles`,
+  session: `${PREFIX}session`,
+  leave: `${PREFIX}leave`,
+  attendance: `${PREFIX}attendance`,
+  /** File *metadata* only. Contents live in IndexedDB; see lib/idb.ts. */
+  files: `${PREFIX}files`,
 } as const;
 
 /** Read and JSON-parse a key, or return null if absent, corrupt or unavailable. */

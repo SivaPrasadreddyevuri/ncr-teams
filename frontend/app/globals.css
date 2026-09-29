@@ -3719,6 +3719,104 @@ button {
   }
 }
 
+/* Role gate. The pending state is deliberately empty: /hr is prerendered, so
+   rendering the children before the role is known would flash HR content at an
+   employee during hydration. */
+.gate-pending {
+  min-height: 180px;
+}
+
+.gate-denied {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 22px;
+}
+
+.gate-denied h2 {
+  margin: 2px 0 6px;
+  font-size: 17px;
+}
+
+.gate-denied p {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted);
+  max-width: 46ch;
+}
+
+.gate-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Persona picker on the login screen. */
+/* Reserves the greeting's height before the real value arrives, so the card
+   below does not jump when the client resolves the clock. */
+.greeting-placeholder {
+  display: inline-block;
+  min-width: 190px;
+}
+
+.persona-picker {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.persona-option {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 9px 11px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.persona-option:hover {
+  border-color: #b9d7f8;
+  background: #f7fbff;
+}
+
+.persona-option[aria-pressed='true'] {
+  border-color: #1585e9;
+  background: #eef6ff;
+  box-shadow: inset 0 0 0 1px #1585e9;
+}
+
+.persona-option-text {
+  min-width: 0;
+}
+
+.persona-option-text strong {
+  display: block;
+  font-size: 14px;
+}
+
+.persona-option-text small {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.persona-option .chip {
+  margin-left: auto;
+  flex: none;
+}
+
+.persona-picker-label {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
 .file-cards {
   display: none;
   list-style: none;

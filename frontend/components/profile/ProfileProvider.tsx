@@ -1,36 +1,40 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { currentUser, directory, type Person } from '@/lib/data';
+import { directory, type Person } from '@/lib/data';
 import { readJson, storageKeys, writeJson } from '@/lib/storage';
+import { useWorkspace } from '@/components/workspace/WorkspaceProvider';
 
 /**
- * The signed-in person's editable profile.
+ * Per-person editable profiles.
  *
- * This exists because `lib/data.ts` is a static module: every screen imported
- * `currentUser` directly, so editing your name or photo in Settings could never
- * reach the sidebar, the topbar or anywhere else. Holding the profile in
- * context makes the settings form and the rest of the app read one value.
+ * This started as a single profile, which was already wrong: the settings form
+ * kept its copy in local state, so a name edited in Settings never reached the
+ * sidebar or the topbar. Adding a persona switcher made that untenable -- one
+ * shared profile would have leaked Alex's edits onto Priya -- so this is a map
+ * keyed by person id.
  *
  * Only the editable fields are persisted. `id`, `role`, `employeeCode` and
- * `online` are deliberately left out: they are not user-editable, and writing
- * them to storage would only invite tampering with values the app treats as
- * authoritative.
+ * `online` are not user-editable, and writing them would only invite tampering
+ * with values the app treats as authoritative.
  */
 type EditableProfile = Pick<
   Person,
   'name' | 'email' | 'jobTitle' | 'department' | 'phone' | 'bio' | 'avatarUrl'
 >;
 
-type ProfileContextValue = {
-  profile: Person;
-  /** True once the stored profile has been read and applied. */
+type ProfileMap = Record<string, EditableProfile>;
+
+type ProfileValue = {
+  /** True once stored profiles have been read and applied. */
   ready: boolean;
+  /** The full map, so resolvers can read it without re-parsing storage. */
+  profiles: ProfileMap;
   setProfile: (patch: Partial<EditableProfile>) => void;
   clearAvatar: () => void;
 };
 
-const ProfileContext = createContext<ProfileContextValue | null>(null);
+const ProfileContext = createContext<ProfileValue | null>(null);
 
 function editableOf(person: Person): EditableProfile {
   return {
@@ -44,94 +48,110 @@ function editableOf(person: Person): EditableProfile {
   };
 }
 
-function toPerson(previous: Person, patch: Partial<EditableProfile>): Person {
+function applyPatch(person: Person, patch: Partial<EditableProfile>): Person {
   return {
-    ...previous,
-    name: patch.name ?? previous.name,
-    email: patch.email ?? previous.email,
-    jobTitle: patch.jobTitle ?? previous.jobTitle,
-    department: patch.department ?? previous.department,
-    phone: patch.phone ?? previous.phone,
-    bio: patch.bio ?? previous.bio,
-    avatarUrl: patch.avatarUrl === undefined ? previous.avatarUrl : patch.avatarUrl,
+    ...person,
+    name: patch.name ?? person.name,
+    email: patch.email ?? person.email,
+    jobTitle: patch.jobTitle ?? person.jobTitle,
+    department: patch.department ?? person.department,
+    phone: patch.phone ?? person.phone,
+    bio: patch.bio ?? person.bio,
+    avatarUrl: patch.avatarUrl === undefined ? person.avatarUrl : patch.avatarUrl,
   };
 }
 
+function overlay(base: Person, stored: ProfileMap): Person {
+  const patch = stored[base.id];
+  return patch ? applyPatch(base, patch) : base;
+}
+
 export function ProfileProvider({ children }: { children: React.ReactNode }) {
-  // The server and the first client paint both render `currentUser`, and the
-  // stored profile is applied afterwards in an effect. Reading localStorage
-  // during render would make the two disagree.
-  const [profile, setProfileState] = useState<Person>(currentUser);
+  // Empty on the server and on the first client paint, then restored. Reading
+  // storage during render would make the two disagree.
+  const [profiles, setProfiles] = useState<ProfileMap>({});
   const [ready, setReady] = useState(false);
+  const { activeUserId } = useWorkspace();
 
   useEffect(() => {
-    const stored = readJson<Partial<EditableProfile>>(storageKeys.profile);
-    if (stored) setProfileState((current) => toPerson(current, stored));
+    setProfiles(readJson<ProfileMap>(storageKeys.profiles) ?? {});
     setReady(true);
   }, []);
 
-  const setProfile = useCallback((patch: Partial<EditableProfile>) => {
-    setProfileState((current) => {
-      const next = toPerson(current, patch);
-      writeJson(storageKeys.profile, editableOf(next));
-      return next;
-    });
-  }, []);
+  useEffect(() => {
+    if (!ready) return;
+    writeJson(storageKeys.profiles, profiles);
+  }, [ready, profiles]);
+
+  const setProfile = useCallback(
+    (patch: Partial<EditableProfile>) => {
+      setProfiles((current) => {
+        const base = directory.find((person) => person.id === activeUserId);
+        const previous = current[activeUserId] ?? (base ? editableOf(base) : undefined);
+        if (!previous) return current;
+
+        return { ...current, [activeUserId]: { ...previous, ...patch } };
+      });
+    },
+    [activeUserId],
+  );
 
   const clearAvatar = useCallback(() => {
-    setProfileState((current) => {
-      const next = { ...current };
-      // Deleting the key is explicit rather than storing `undefined`, so a
-      // later parse cannot resurrect a stale value from a null.
+    setProfiles((current) => {
+      const entry = current[activeUserId];
+      if (!entry) return current;
+
+      // Deleting the key beats storing `undefined`, which survives a round trip
+      // through JSON as an absent property anyway.
+      const next = { ...entry };
       delete next.avatarUrl;
-      writeJson(storageKeys.profile, editableOf(next));
-      return next;
+      return { ...current, [activeUserId]: next };
     });
-  }, []);
+  }, [activeUserId]);
 
   const value = useMemo(
-    () => ({ profile, ready, setProfile, clearAvatar }),
-    [profile, ready, setProfile, clearAvatar],
+    () => ({ ready, profiles, setProfile, clearAvatar }),
+    [ready, profiles, setProfile, clearAvatar],
   );
 
   return <ProfileContext.Provider value={value}>{children}</ProfileContext.Provider>;
 }
 
-export function useProfile(): ProfileContextValue {
+export function useProfile(): ProfileValue {
   const context = useContext(ProfileContext);
   if (!context) throw new Error('useProfile must be used inside <ProfileProvider>');
   return context;
 }
 
 /**
- * The person to display for `person`, with local edits folded in.
+ * The person to render for `person`, with any local edits folded in.
  *
- * Only the signed-in user is ever overridable. Colleagues fall through to the
- * static dataset untouched, because there is no UI to edit them and letting the
- * store drift from the fixture would be worse than the duplication.
- *
- * Use this for a single person. Inside a list, use `useDirectory` instead --
- * hooks cannot be called in a loop.
+ * Edits are looked up by id, so the signed-in user sees their own changes
+ * anywhere they appear and colleagues are never affected. Use this for a single
+ * person; inside a list use `useDirectory` instead, because hooks cannot be
+ * called in a loop.
  */
 export function useResolvedPerson(person: Person | null | undefined): Person | null {
-  const { profile } = useProfile();
-  if (!person) return null;
-  return person.id === currentUser.id ? profile : person;
+  const { ready, profiles } = useProfile();
+
+  // Before the restore there is nothing to overlay, and returning the fixture
+  // keeps the first paint identical to the server's.
+  if (!person || !ready) return person ?? null;
+  return overlay(person, profiles);
 }
 
-/**
- * The directory with the signed-in user's local edits applied.
- *
- * A server-rendered list cannot call this, because it has no access to browser
- * storage. Those lists still show the uploaded photo -- `PersonAvatar` is a
- * client component and reads the store itself -- but their *name* labels come
- * from the fixture. That asymmetry is deliberate rather than an oversight.
- */
+/** The directory with local edits applied. */
 export function useDirectory(): Person[] {
-  const { profile } = useProfile();
+  const { ready, profiles } = useProfile();
 
   return useMemo(
-    () => directory.map((person) => (person.id === currentUser.id ? profile : person)),
-    [profile],
+    () => (ready ? directory.map((person) => overlay(person, profiles)) : directory),
+    [ready, profiles],
   );
+}
+
+/** The signed-in person, with local edits applied. */
+export function useActivePerson(): Person {
+  const { activeUser } = useWorkspace();
+  return useResolvedPerson(activeUser) ?? activeUser;
 }
