@@ -13,7 +13,8 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { activity, calendarEvents, dashboardStats } from '@/lib/data';
-import { formatTime, relativeTime, startOfDay } from '@/lib/format';
+import { formatTime, relativeTime, startOfAppDay, appHour, formatLongDate } from '@/lib/format';
+import { HomeClock } from '@/components/HomeClock';
 import type { ActivityItem } from '@/lib/data';
 
 const activityIcons: Record<ActivityItem['kind'], LucideIcon> = {
@@ -30,16 +31,17 @@ const tones: Record<ActivityItem['kind'], string> = {
   leave: 'tone-orange',
 };
 
-function greeting(): string {
-  const hour = new Date().getHours();
+function greeting(hour: number): string {
   if (hour < 12) return 'Good morning';
   if (hour < 18) return 'Good afternoon';
   return 'Good evening';
 }
 
 export default function Home() {
+  // "Today" is the viewer's day in the app zone, not the build server's. Using
+  // the host's local day here would freeze the wrong day into the static HTML.
   const now = new Date();
-  const todayStart = startOfDay(now).getTime();
+  const todayStart = startOfAppDay(now).getTime();
   const todayEnd = todayStart + 86_399_999;
 
   const todaysMeetings = calendarEvents
@@ -51,20 +53,20 @@ export default function Home() {
 
   return (
     <>
+      <HomeClock events={calendarEvents} />
+
       <div className="welcome">
         <div>
           <h2>
-            {greeting()}, Alex
+            {greeting(appHour(now))}, Alex
           </h2>
           <p>Here&apos;s what&apos;s happening with your teams today.</p>
         </div>
+        {/* The date is not repeated here: the clock above owns it and updates
+            live, whereas anything rendered in this server component is frozen
+            into the prerendered HTML at build time. */}
         <span className="welcome-badge">
-          {now.toLocaleDateString('en-GB', {
-            weekday: 'long',
-            day: 'numeric',
-            month: 'long',
-            year: 'numeric',
-          })}
+          {formatLongDate(now)}
         </span>
       </div>
 

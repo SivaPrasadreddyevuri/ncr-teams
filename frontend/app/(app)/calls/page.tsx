@@ -2,7 +2,7 @@ import { SectionCard } from '@/components/SectionCard';
 import { Avatar } from '@/components/Avatar';
 import { PhoneIncoming, PhoneMissed, Clock3 } from 'lucide-react';
 import { calendarEvents, meetings, personById } from '@/lib/data';
-import { formatTime, initials, relativeTime } from '@/lib/format';
+import { formatTime, initials, relativeTime, APP_TIME_ZONE } from '@/lib/format';
 
 export default function CallsPage() {
   const past = [...meetings].sort((a, b) => b.startsAt.localeCompare(a.startsAt)).slice(0, 4);
@@ -44,12 +44,7 @@ export default function CallsPage() {
           upcoming.map((event) => (
             <div className="meeting-row" key={event.id}>
               <span className="time is-date">
-                {new Date(event.startsAt).toLocaleDateString('en-GB', {
-                  weekday: 'short',
-                  day: 'numeric',
-                  month: 'short',
-                  timeZone: 'UTC',
-                })}
+                {new Date(event.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: APP_TIME_ZONE })}
               </span>
               <div className="meeting-info">
                 <strong>{event.title}</strong>

@@ -6,7 +6,7 @@ import { MeetingRoom } from './MeetingRoom';
 import { SectionCard } from '@/components/SectionCard';
 import { Avatar } from '@/components/Avatar';
 import { currentUser, meetings, personById, directory } from '@/lib/data';
-import { formatTime, initials, relativeTime } from '@/lib/format';
+import { formatTime, initials, relativeTime, APP_TIME_ZONE } from '@/lib/format';
 
 export function MeetingsView({ initialRoomId }: { initialRoomId?: string }) {
   const [roomId, setRoomId] = useState(initialRoomId ?? null);
@@ -32,12 +32,7 @@ export function MeetingsView({ initialRoomId }: { initialRoomId?: string }) {
           return (
             <div className="meeting-row" key={meeting.id}>
               <span className="time is-date">
-                {new Date(meeting.startsAt).toLocaleDateString('en-GB', {
-                  weekday: 'short',
-                  day: 'numeric',
-                  month: 'short',
-                  timeZone: 'UTC',
-                })}
+                {new Date(meeting.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: APP_TIME_ZONE })}
               </span>
               <div className="meeting-info">
                 <strong>{meeting.title}</strong>

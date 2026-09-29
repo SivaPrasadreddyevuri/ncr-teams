@@ -435,6 +435,22 @@ button {
   color: #52617c;
 }
 
+/* Grid and flex items default to `min-width: auto`, which means a track refuses
+   to shrink below its content's min-content width. A wide child -- a table
+   carrying its own min-width, or a long unbroken string -- therefore widened the
+   whole track and made the document itself scroll sideways: /calls and /hr
+   overflowed by 9px and 15px at a 320px viewport. `min-width: 0` restores the
+   ability to shrink, and the inner `overflow-x: auto` wrappers then do the
+   scrolling they exist for. It has no visual effect wherever the content
+   already fits, so desktop is unaffected. */
+.stats > *,
+.grid-2 > *,
+.page-grid > *,
+.cards-grid > *,
+.section-card {
+  min-width: 0;
+}
+
 .stats {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -457,8 +473,12 @@ button {
   align-items: center;
 }
 
-.stat-card strong,
-.stat-card span {
+/* Targets the label inside the text column only. It must not match every span
+   in the card: `.stat-icon` is itself a span, and at specificity 0,1,1 this
+   rule would beat `.stat-icon`'s own `display: grid` (0,1,0), killing
+   `place-items: center` and leaving the icon 11px above its box's centre. */
+.stat-card > div strong,
+.stat-card > div span {
   display: block;
 }
 
@@ -2518,9 +2538,30 @@ button {
 
   /* Calendar keeps its horizontal scroll on phones; five days will not fit.
      Driven by --cols so a 7-day week scrolls too, with a floor wide enough
-     that day names stay readable. */
-  .calendar-week {
+     that day names stay readable. The day view renders a single column, so it
+     is exempt -- one day does fit. */
+  .calendar-week:not([data-days='1']) {
     grid-template-columns: 46px repeat(var(--cols), minmax(96px, 1fr));
+  }
+
+  /* A single day is the phone default; the 5/7 switch is meaningless there. */
+  .cal-days-toggle {
+    display: none;
+  }
+
+  /* The table's 560px floor cannot fit, so the card list takes over.
+     Qualified with the element name on purpose: the base `.file-cards
+     { display: none }` rule is declared further down this file, and at equal
+     specificity the later declaration would win and hide the cards again. */
+  ul.file-cards {
+    display: block;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 0 0 16px 16px;
+  }
+
+  .files-table-wrap {
+    display: none;
   }
 
   .calendar-grid {
@@ -3361,7 +3402,13 @@ button {
 
 /* Settings: the 210px rail ate 56% of a 375px screen, squeezing the form
    column to ~100px and clipping every input to "Alex J". Below 900px the
-   rail becomes a horizontal strip instead. */
+   rail becomes a wrapping row of pills instead of a side rail.
+
+   It wraps rather than scrolling sideways on purpose. A horizontal strip was
+   the first attempt, but it reintroduced the exact problem this project set
+   out to remove: a 375px screen could only reach the first two or three
+   sections without panning. Wrapping costs a little vertical space and keeps
+   every section visible. */
 @media (max-width: 900px) {
   .settings {
     grid-template-columns: minmax(0, 1fr);
@@ -3373,14 +3420,8 @@ button {
     top: 0;
     z-index: 5;
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
-    overflow-x: auto;
-    padding-bottom: 4px;
-    scrollbar-width: none;
-  }
-
-  .settings-nav::-webkit-scrollbar {
-    display: none;
   }
 
   .settings-nav button {
@@ -3409,17 +3450,234 @@ button {
   margin-left: 6px;
 }
 
+/* A single day takes the full width rather than sitting in a narrow column, so
+   event titles have room and nothing needs to scroll sideways. */
+.calendar-week[data-days='1'] {
+  grid-template-columns: 54px minmax(0, 1fr);
+}
+
+.calendar-week[data-days='1'] .calendar-event strong,
+.calendar-week[data-days='1'] .calendar-event .ev-detail {
+  white-space: normal;
+}
+
+/* ============================================================
+   Home clock
+   ============================================================ */
+
+.home-clock {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: 18px;
+  align-items: center;
+  padding: 16px 20px;
+  margin-bottom: 4px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 8px 25px #244b7a08;
+}
+
+.home-clock-time,
+.home-clock-next {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-width: 0;
+}
+
+.home-clock-next {
+  padding-left: 18px;
+  border-left: 1px solid var(--line);
+}
+
+.home-clock-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: 11px;
+  background: #e7f4ff;
+  color: #1585e9;
+}
+
+.home-clock-next .home-clock-icon {
+  background: #f0eaff;
+  color: #8149ed;
+}
+
+.home-clock-digits {
+  display: block;
+  font-size: 27px;
+  line-height: 1.1;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.home-clock-digits small {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.home-clock-placeholder {
+  color: #b3bfd2;
+}
+
+.home-clock-date {
+  display: block;
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.home-clock-next > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.home-clock-next small {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8a97ae;
+}
+
+.home-clock-next strong {
+  display: block;
+  font-size: 15px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-clock-meta {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-clock-countdown {
+  flex: none;
+  padding: 7px 13px;
+  border-radius: 20px;
+  background: #e7f1ff;
+  color: #1668b8;
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .home-clock {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .home-clock-next {
+    padding-left: 0;
+    padding-top: 14px;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+}
+
+@media (max-width: 420px) {
+  .home-clock {
+    padding: 14px 16px;
+  }
+
+  .home-clock-digits {
+    font-size: 23px;
+  }
+}
+
+.file-cards {
+  display: none;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.file-card {
+  padding: 14px 16px;
+  border-bottom: 1px solid #eef1f6;
+}
+
+.file-card:last-child {
+  border-bottom: 0;
+}
+
+.file-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.file-card-head .file-link {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.file-card-actions {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+
+.file-card-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0 0;
+}
+
+.file-card-meta dt {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8a97ae;
+  margin: 0 0 2px;
+}
+
+.file-card-meta dd {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Toolbars: the calendar toolbar was being clipped by .calendar's
-   overflow:hidden, putting the view toggles and New event out of reach. */
-@media (max-width: 640px) {
+   overflow:hidden, putting the view toggles and New event out of reach.
+   The breakpoint is 900px, not 640px: at 768px the Day/Week/Month toggle,
+   the 5/7 switch and New event together need ~460px, which does not fit
+   beside the 199px date label, and the "New event" button was pushed ~12px
+   past the viewport and clipped by the card. */
+@media (max-width: 900px) {
   .calendar-toolbar {
     flex-wrap: wrap;
     row-gap: 10px;
   }
 
-  /* The toolbar's own two groups have to wrap too, otherwise the right-hand
-     group keeps one line and its trailing button is clipped by the card. */
+  /* flex-wrap alone was not enough: the right-hand group is a single flex item
+     with `flex: none`-ish content, so it kept its full intrinsic width and
+     overflowed instead of wrapping internally. A shrinkable basis lets the two
+     groups share the row and lets the right one wrap onto extra lines. */
   .calendar-toolbar > div {
+    flex: 1 1 240px;
+    min-width: 0;
     flex-wrap: wrap;
     row-gap: 8px;
   }
@@ -3453,10 +3711,18 @@ button {
   }
 }
 /* The topbar title and crumb were wrapping to two lines on narrow screens.
-   min-width:0 is required for a flex item to shrink below its content. */
+   min-width:0 is required for a flex item to shrink below its content.
+
+   Truncation is the fallback, not the goal. At the default 19px the
+   "Dashboard / Home" crumb needed 160px in a 125px box and was cut to
+   "Dashboard / H...", so the type is stepped down first to buy back the room. */
 @media (max-width: 520px) {
   .topbar-title {
     min-width: 0;
+  }
+
+  .topbar h1 {
+    font-size: 17px;
   }
 
   .topbar-title h1,

@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { SectionCard } from '@/components/SectionCard';
 import { activity, calendarEvents } from '@/lib/data';
-import { formatTime, relativeTime } from '@/lib/format';
+import { formatTime, relativeTime, APP_TIME_ZONE } from '@/lib/format';
 import type { ActivityItem } from '@/lib/data';
 
 const icons: Record<ActivityItem['kind'], LucideIcon> = {
@@ -71,12 +71,7 @@ export default function ActivityPage() {
               {/* The day is what makes this list readable: a bare time gives no
                   hint that 13:00 is tomorrow and 16:00 is three days out. */}
               <span className="time is-date">
-                {new Date(event.startsAt).toLocaleDateString('en-GB', {
-                  weekday: 'short',
-                  day: 'numeric',
-                  month: 'short',
-                  timeZone: 'UTC',
-                })}
+                {new Date(event.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: APP_TIME_ZONE })}
               </span>
               <div className="meeting-info">
                 <strong>{event.title}</strong>

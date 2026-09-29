@@ -103,7 +103,7 @@ export function FilesTable({ initialFiles }: { initialFiles: FileRow[] }) {
         </div>
       </div>
 
-      <div className="table-wrap" style={{ borderRadius: '0 0 16px 16px' }}>
+      <div className="table-wrap files-table-wrap" style={{ borderRadius: '0 0 16px 16px' }}>
         <table className="file-table">
           <thead>
             <tr>
@@ -183,6 +183,87 @@ export function FilesTable({ initialFiles }: { initialFiles: FileRow[] }) {
           </tbody>
         </table>
       </div>
+
+      {/*
+        Phone layout. The table has a deliberate 560px floor so its columns stay
+        readable, which means a 375px screen has to pan sideways. This is the
+        same data as stacked cards with labelled fields, so nothing scrolls
+        horizontally. The table above is hidden at this width by CSS.
+      */}
+      <ul className="file-cards">
+        {visible.length === 0 ? (
+          <li className="file-card">
+            <div className="empty-state">
+              <span className="empty-icon">
+                <Folder size={22} />
+              </span>
+              <p>No files found</p>
+              <span className="empty-meta">Try a different search or team</span>
+            </div>
+          </li>
+        ) : (
+          visible.map((row) => {
+            const Icon = iconFor(row.type);
+            return (
+              <li className="file-card" key={row.id}>
+                <div className="file-card-head">
+                  <span className="file-icon">
+                    <Icon size={15} />
+                  </span>
+                  {row.folder ? (
+                    <button
+                      className="file-link"
+                      type="button"
+                      onClick={() => setBreadcrumb((c) => [...c, row.name])}
+                    >
+                      {row.name}
+                    </button>
+                  ) : (
+                    <span className="file-link">{row.name}</span>
+                  )}
+
+                  <div className="file-card-actions">
+                    <button
+                      className="icon-btn"
+                      type="button"
+                      onClick={() => toggleStar(row.id)}
+                      aria-label={row.starred ? `Unstar ${row.name}` : `Star ${row.name}`}
+                      aria-pressed={Boolean(row.starred)}
+                      style={row.starred ? { color: '#f0a20b' } : undefined}
+                    >
+                      <Star size={15} />
+                    </button>
+                    <button
+                      className="icon-btn"
+                      type="button"
+                      onClick={() => remove(row.id)}
+                      aria-label={`Delete ${row.name}`}
+                      title="Remove from this demo"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                </div>
+
+                <dl className="file-card-meta">
+                  <div>
+                    <dt>Team</dt>
+                    <dd>{row.team}</dd>
+                  </div>
+                  <div>
+                    <dt>Size</dt>
+                    <dd>{row.folder ? '\u2014' : formatBytes(row.size)}</dd>
+                  </div>
+                  <div>
+                    <dt>Updated</dt>
+                    <dd>{relativeTime(row.createdAt)}</dd>
+                  </div>
+                </dl>
+              </li>
+            );
+          })
+        )}
+      </ul>
 
       {breadcrumb.length > 0 && (
         <div className="calendar-legend" style={{ borderTop: 0 }}>

@@ -95,15 +95,15 @@ no persistence.
 
 | Route | What it does |
 | --- | --- |
-| `/` | Dashboard — greeting, stat cards, today's meetings, activity |
+| `/` | Dashboard — live clock, next-event countdown, greeting, stat cards, today's meetings, activity |
 | `/activity` | Combined activity feed and upcoming events |
 | `/apps` | Launcher |
 | `/attendance` | Check in/out, personal history, team board |
-| `/calendar` | Week and month views, 5 or 7 day toggle, event CRUD |
+| `/calendar` | Day, week and month views, 5 or 7 day toggle, event CRUD |
 | `/calls` | Call history and upcoming links |
 | `/channels` | Channel directory grouped by team |
 | `/chat` | Channels, threads, reactions, composer |
-| `/files` | File table, folders, starring, storage meter |
+| `/files` | File table on wide screens, card list on phones, folders, starring, storage meter |
 | `/hr` | Leave approvals, departments, directory |
 | `/meetings` | Meeting list and the in-room experience |
 | `/search` | Ranked search with scope filters and term highlighting |
@@ -131,14 +131,33 @@ kept resolving to `frontend/lib/format` and **not one import statement needed
 rewriting**. Git recorded the move as renames with 100% similarity. It also
 means `@/app/...` always means the frontend, never the backend.
 
-**Fixture times are UTC on both the server and the client.** The first deployed
-build showed a 10:00 standup at **15:30** for anyone not on UTC. `daysFromNow()`
-called `setHours()`, which interprets its argument in *the process's* timezone —
-fine locally, wrong on Vercel, where functions run in UTC. The server therefore
-emitted 10:00 and the browser re-rendered it as 15:30: a hydration mismatch, not
-just a display shift. Fixtures are now built with `Date.UTC` and every formatter
-pins `timeZone: 'UTC'`, so both sides read the same clock. Attendance keeps the
-local helpers, because a working day genuinely *is* the viewer's local day.
+**Scheduled times are pinned to `Asia/Kolkata` on both the server and the
+client.** The first deployed build showed a 10:00 standup at **15:30** for anyone
+not on UTC. `daysFromNow()` called `setHours()`, which interprets its argument in
+*the process's* timezone — fine locally, wrong on Vercel, where functions run in
+UTC. The server therefore emitted 10:00 and the browser re-rendered it as 15:30: a
+hydration mismatch, not just a display shift. UTC was the first fix, but it is
+wrong for the product: this is a workspace where a standup *is* at 10:00 IST
+regardless of where the page is served from. `APP_TIME_ZONE` in `lib/format.ts`
+is now the single source of truth, and every fixture and formatter resolves
+against it.
+
+Pinning a zone is only half of it. The offset itself has to be computed without
+reference to the host timezone, or the same bug reappears on a developer machine
+whose clock matches the app's. `appZoneOffsetMinutes()` reads the zone's wall
+clock through `Intl.DateTimeFormat` and rebuilds it with `Date.UTC`; the obvious
+alternative, `new Date(date.toLocaleString(...))`, looks equivalent and silently
+returns a **zero** offset when the host is on IST. Verified against five host
+timezones.
+
+**The home clock is the deliberate exception: it shows the viewer's own local
+time.** That value cannot be known on the server, and almost every route is
+prerendered, so `HomeClock` renders a `--:--` placeholder until it mounts and
+fills in afterwards. Reading `window.innerWidth` in a `useState` initialiser to
+pick a layout would produce exactly the mismatch the zone pinning exists to
+prevent, so the phone default is applied in an effect instead. The clock is
+suppressed with `suppressHydrationWarning` and announced to screen readers on a
+30-second cadence rather than every tick, which is unusable to listen to.
 
 **Attendance stores a `date`, not a timestamp.** The first build generated
 `DD/MM/YYYY` strings, which `new Date()` cannot parse — every row rendered
@@ -174,6 +193,50 @@ The intended next milestone is a real backend, in this order:
 Nothing above requires a structural change. Pages already receive plain objects,
 and the mutating handlers are isolated in client components, so the data layer
 can be swapped without touching layout or design.
+
+## Responsiveness, and how it was checked
+
+Every route was verified at 17 widths from 320px to 1600px against a real
+production build in headless Chrome. Two things about that are worth recording,
+because both produced confident false results first.
+
+**Screenshots alone are not a test, and neither is a document-level check.**
+`document.scrollWidth` reported every page clean while the files list was in fact
+unusable on a phone: the real defect was a 560px `min-width` on a table that
+scrolled *inside* its own container, which never touches the document. The check
+that matters is whether content **escapes the viewport** — measure
+`getBoundingClientRect().right` against `documentElement.clientWidth` for every
+element, not scroll widths.
+
+**A passing sweep can be measuring an empty page.** The first run of the improved
+check reported 78 routes clean while the app was failing to load: `next start`
+had been running since before a rebuild and was serving stale chunk hashes, so
+every route threw `ChunkLoadError` and rendered nothing. An empty body has no
+overflow. The sweep now captures `Runtime.consoleAPICalled` and fails on React
+hydration warnings, which is the only way those surface — and the fix is to stop
+the old server, delete `.next`, and rebuild, since a running server caches the
+build manifest in memory.
+
+**`--window-size` does not work on Windows.** `chrome --headless --window-size`
+clamps and crops, so a 375px run silently measured something wider. The numbers
+above come from CDP `Emulation.setDeviceMetricsOverride`, which sets the layout
+viewport directly.
+
+Three CSS rules account for most of what was fixed, and all three are easy to get
+wrong in a way that *looks* right:
+
+- `min-width: 0` on grid children. Grid items default to `min-width: auto` and
+  refuse to shrink below their content, so one wide table widened the whole track
+  and made the document scroll sideways — 9px on `/calls`, 15px on `/hr`, only
+  visible at 320px.
+- A table becomes a card list below 640px, and the calendar becomes a one-day
+  column below 760px, rather than either being allowed to pan sideways. A phone
+  cannot show five day columns, and a settings rail that scrolls horizontally
+  hides most of its own tabs.
+- The card list's `display: block` override is qualified as `ul.file-cards`. The
+  base `.file-cards { display: none }` is declared *later* in the file, and at
+  equal specificity the later rule wins — the cards were in the DOM the whole
+  time and simply not displayed.
 
 ## Licence
 

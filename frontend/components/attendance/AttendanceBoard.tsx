@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { LogIn, LogOut, Clock3, CheckCircle2, Laptop, PieChart, UserX } from 'lucide-react';
 import { Avatar } from '@/components/Avatar';
 import { SectionCard } from '@/components/SectionCard';
-import { initials, formatTime, localDayKey, parseDayKey } from '@/lib/format';
+import { initials, formatTime, formatDayLabel, localDayKey } from '@/lib/format';
 import { attendance as seed, currentUser, directory, type AttendanceRecord } from '@/lib/data';
 
 const STATUSES: Array<{ id: AttendanceRecord['status']; label: string; tone: string; icon: typeof Clock3 }> = [
@@ -111,13 +111,7 @@ export function AttendanceBoard() {
           const status = STATUSES.find((s) => s.id === record.status);
           return (
             <div className="meeting-row" key={record.id}>
-              <span className="time is-date">
-                {parseDayKey(record.date).toLocaleDateString('en-GB', {
-                  weekday: 'short',
-                  day: 'numeric',
-                  month: 'short',
-                })}
-              </span>
+              <span className="time is-date">{formatDayLabel(record.date)}</span>
               <div className="meeting-info">
                 <strong>{status?.label ?? record.status}</strong>
                 <small>
