@@ -1,6 +1,7 @@
 # NCR Teams
 
-![CI](https://github.com/EvuriSivaPrasadReddy/ncr-teams/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/SivaPrasadreddyevuri/ncr-teams/actions/workflows/ci.yml/badge.svg)
+[![Live demo](https://img.shields.io/badge/live-demo-ncr--teams.vercel.app-0070f0?style=flat-square)](https://ncr-teams.vercel.app)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
 ![Next.js 15](https://img.shields.io/badge/Next.js-15-000000)
 ![React 19](https://img.shields.io/badge/React-19-087ea4)
