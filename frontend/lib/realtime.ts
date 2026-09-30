@@ -106,11 +106,6 @@ export class RealtimeClient {
     this.sendSubscribe();
   }
 
-  unsubscribe(channelIds: string[]): void {
-    for (const id of channelIds) this.channels.delete(id);
-    this.sendSubscribe();
-  }
-
   send(type: string, payload: unknown = {}): void {
     if (this.socket?.readyState !== WebSocket.OPEN) return;
     this.socket.send(JSON.stringify({ type, payload }));

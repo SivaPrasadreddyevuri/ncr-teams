@@ -209,23 +209,13 @@ export const api = {
   /**
    * Signs in.
    *
-   * Two shapes come back from the same 200. With no second factor the response
-   * carries a `user`; with one enabled it carries a `challengeToken` and *no*
-   * session has been issued. Both are in the union so the caller has to handle
-   * the second case, rather than discovering it when nothing is authenticated.
+   * Always returns a user and sets a session. Two-factor was removed: the login
+   * challenge was unreachable because nothing could enable the factor.
    */
   login: (email: string, password: string) =>
-    request<
-      | { user: { id: string; email: string; role: Person['role'] }; challengeToken?: undefined }
-      | { challengeToken: string; method: 'totp'; user?: undefined }
-    >('/auth/login', {
+    request<{ user: { id: string; email: string; role: Person['role'] } }>('/auth/login', {
       method: 'POST',
       body: { email, password },
-    }),
-  loginWithTwoFactor: (challengeToken: string, code: string) =>
-    request<{ user: { id: string; email: string; role: Person['role'] } }>('/auth/verify-2fa', {
-      method: 'POST',
-      body: { challengeToken, code },
     }),
   logout: () => request<void>('/auth/logout', { method: 'POST' }),
   me: () => request<{ user: { id: string; email: string; role: Person['role'] } }>('/auth/me'),
@@ -233,19 +223,39 @@ export const api = {
     request<{ token: string; expiresAt: string; expiresInSeconds: number }>('/auth/ws-token'),
 
   /* people and structure */
+
+  /**
+   * Updates the signed-in user's own profile.
+   *
+   * The server's schema is strict, so an unknown key is a 400. `department` and
+   * `email` are deliberately not sent from the settings form: the first is a
+   * foreign key reached through a name, the second is the login identity. An
+   * empty string is sent as `null`, because the server treats '' as invalid for
+   * the nullable text fields and `null` is how a field is cleared.
+   */
+  updateMyProfile: (patch: {
+    name?: string;
+    jobTitle?: string | null;
+    phone?: string | null;
+    bio?: string | null;
+  }) =>
+    request<{ user: Person }>('/users/me', {
+      method: 'PATCH',
+      body: Object.fromEntries(
+        Object.entries(patch).map(([key, value]) => [key, value === '' ? null : value]),
+      ),
+    }),
+
   users: (signal?: AbortSignal) => request<{ users: Person[] }>('/users', { signal }),
   teams: (signal?: AbortSignal) => request<{ teams: Team[] }>('/teams', { signal }),
-  channels: (teamId: string, signal?: AbortSignal) =>
-    request<{ channels: Channel[] }>(`/channels?teamId=${encodeURIComponent(teamId)}`, { signal }),
-
   /**
    * Channels across several teams, in parallel.
    *
-   * `GET /channels` requires a `teamId` on purpose: an unfiltered listing would
-   * hand back channels from teams the caller is not in, and the guard against
-   * that is the parameter itself. So the Channels screen fans out instead of
-   * asking for everything. A handful of tiny parallel requests beats weakening a
-   * membership check.
+   * There is deliberately no single-team variant. `GET /channels` requires a
+   * `teamId` on purpose: an unfiltered listing would hand back channels from
+   * teams the caller is not in, and the guard against that is the parameter
+   * itself. Every screen that needs channels wants several teams, so the
+   * fan-out is the only shape offered.
    */
   channelsForTeams: async (teamIds: string[], signal?: AbortSignal): Promise<Channel[]> => {
     if (teamIds.length === 0) return [];

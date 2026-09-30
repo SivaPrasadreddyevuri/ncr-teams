@@ -8,6 +8,7 @@ import { PersonAvatar } from '@/components/profile/PersonAvatar';
 import { useActivePerson } from '@/components/profile/ProfileProvider';
 import { useWorkspace } from '@/components/workspace/WorkspaceProvider';
 import { titleForPath } from '@/lib/nav';
+import { api } from '@/lib/api';
 import { useNav } from './nav/NavProvider';
 import type { Person } from '@/lib/data';
 
@@ -39,9 +40,25 @@ export function Topbar() {
     setMenuOpen(false);
   }
 
-  function handleSignOut() {
-    // No real session exists. `signOut` resets the active person so the shell
-    // does not keep rendering the previous one's data, then we return to login.
+  async function handleSignOut() {
+    // End the server session before clearing local state.
+    //
+    // A session is a row, and the cookie is httpOnly, so clearing local state
+    // alone does not end it: the token stays valid on the server and every
+    // subsequent request would still be authenticated. That is the one thing
+    // signing out has to do.
+    //
+    // Local state is cleared either way. A failed request means the API is down,
+    // and refusing to sign out in that case would trap the user in an app they
+    // have chosen to leave.
+    try {
+      await api.logout();
+    } catch {
+      // Deliberately swallowed. The server session may survive if this failed,
+      // which is worth knowing but not worth blocking on -- and there is nothing
+      // the user could do about it here anyway.
+    }
+
     signOut();
     setMenuOpen(false);
     router.push('/login');
@@ -124,14 +141,6 @@ export function Topbar() {
                   onClick={() => setMenuOpen(false)}
                 >
                   Account settings
-                </Link>
-                <Link
-                  className="user-menu-item"
-                  href="/verify-2fa"
-                  role="menuitem"
-                  onClick={() => setMenuOpen(false)}
-                >
-                  Security &amp; two-factor
                 </Link>
 
                 <button className="user-menu-item danger" role="menuitem" onClick={handleSignOut}>

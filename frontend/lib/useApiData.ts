@@ -29,21 +29,23 @@
  * hard to notice and easy to be caught by.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ApiError } from '@/lib/api';
 import { readJson, writeJson } from '@/lib/storage';
 
 export type ApiData<T> = {
   /** The value to render. Never undefined once mounted. */
   data: T;
-  /** True only for the very first load, when there is nothing to show yet. */
-  loading: boolean;
   /** True when the request failed. `data` is then the cache or the seed. */
   error: string | null;
-  /** True when `data` came from cache or the seed rather than the network. */
+  /**
+   * True when `data` came from cache or the seed rather than the network.
+   *
+   * Nothing reads this yet. It is kept because it is the honest signal for
+   * "this is not live data", and the moment a screen shows a stale indicator it
+   * is already correct. Delete it if that never happens.
+   */
   stale: boolean;
-  /** Re-fetches. Kept stable, so it is safe in a dependency list. */
-  refresh: () => void;
 };
 
 /** `true` when the failure is a missing session, which retrying cannot fix. */
@@ -59,10 +61,8 @@ export function useApiData<T>(
   // The seed is the value until something better arrives, so the screen renders
   // immediately and never flashes an empty state on a slow connection.
   const [data, setData] = useState<T>(fallback);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
-  const [nonce, setNonce] = useState(0);
 
   // The fetcher is usually an inline arrow, so it changes identity on every
   // render. Held in a ref so it is not a dependency, which would loop.
@@ -103,21 +103,15 @@ export function useApiData<T>(
         if (!isUnauthorised(cause)) {
           setError(cause instanceof Error ? cause.message : 'Could not reach the server.');
         }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
       });
 
     return () => {
       cancelled = true;
       controller.abort();
     };
-    // `key` identifies the request; `nonce` is how a manual refresh re-triggers it.
-  }, [key, nonce]);
+  }, [key]);
 
-  const refresh = useCallback(() => setNonce((n) => n + 1), []);
-
-  return { data, loading, error, stale, refresh };
+  return { data, error, stale };
 }
 
 /** Namespaced so a screen's key cannot collide with another part of the app. */

@@ -290,7 +290,7 @@ const notifications = [
 // ordering automatically but also silently drops anything added later that
 // nothing references, which is the wrong trade for a seed.
 const TABLES = [
-  'Notification', 'AuditLog', 'Reaction', 'Message', 'MeetingParticipant',
+  'Notification', 'Reaction', 'Message', 'MeetingParticipant',
   'CalendarAttendee', 'CalendarEvent', 'Meeting', 'File', 'ChannelReadState',
   'Channel', 'TeamMember', 'Team', 'LeaveBalance', 'LeaveRequest', 'Attendance',
   'Session', 'Department', 'User',

@@ -94,16 +94,10 @@ enum AttendanceStatus {
   HALF_DAY
 }
 
-enum AuditAction {
-  EMPLOYEE_CREATED
-  EMPLOYEE_UPDATED
-  EMPLOYEE_DEACTIVATED
-  LEAVE_SUBMITTED
-  LEAVE_APPROVED
-  LEAVE_REJECTED
-  ATTENDANCE_RECORDED
-  PASSWORD_RESET
-}
+// `AuditAction` and the `AuditLog` table were removed. Nothing ever wrote a row:
+// there was no audit trail, only an empty table with indexes implying one. An
+// enum that no code can insert into is the clearest example of a table that
+// looks like a feature and is not.
 
 // Mirrors `ActivityItem['kind']` in the frontend.
 enum NotificationKind {
@@ -128,10 +122,10 @@ model User {
   // layer can hand the column to the UI without a rename in one direction.
   avatarUrl     String?
   bio           String?
-  // The boolean was in the draft but the secret was not, which makes TOTP
-  // impossible: `/verify-2fa` would have nothing to check against.
-  twoFactorEnabled Boolean @default(false)
-  twoFactorSecret  String?
+  // `twoFactorEnabled` and `twoFactorSecret` were removed. The TOTP
+  // implementation was correct and tested, but nothing in the app could ever turn
+  // the factor on, so with the setup UI gone the login challenge was unreachable
+  // and both columns were dead weight. They come back with the feature.
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -170,7 +164,6 @@ model User {
   sessions      Session[]
   notifications Notification[]           @relation("NotificationOwner")
   actedNotifications Notification[]      @relation("NotificationActor")
-  auditLogs     AuditLog[] @relation("AuditActor")
 
   @@index([departmentId])
   @@index([managerId])
@@ -504,23 +497,6 @@ model LeaveBalance {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, type, year])
-}
-
-model AuditLog {
-  id     String      @id @default(cuid())
-  actorId String?
-  action AuditAction
-  // Polymorphic target, so one table covers every entity type.
-  entity   String
-  entityId String
-  detail   String?
-  createdAt DateTime @default(now())
-
-  actor   User? @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
-
-  @@index([createdAt])
-  @@index([entity, entityId])
-  @@index([actorId])
 }
 
 /* ------------------------------------------------------------------ */

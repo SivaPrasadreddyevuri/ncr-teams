@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Check, User, Bell, Palette, Shield } from 'lucide-react';
 import { AvatarPicker } from '@/components/profile/AvatarPicker';
 import { useActivePerson, useProfile } from '@/components/profile/ProfileProvider';
+import { api, ApiError } from '@/lib/api';
 import { type Person } from '@/lib/data';
 
 type Tab = 'profile' | 'notifications' | 'appearance' | 'security';
@@ -23,6 +24,8 @@ export function SettingsPanel() {
   const me = useActivePerson();
   const { setProfile } = useProfile();
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const [notifications, setNotifications] = useState({
     mentions: true,
@@ -34,10 +37,49 @@ export function SettingsPanel() {
   const [density, setDensity] = useState('comfortable');
   const [theme, setTheme] = useState('system');
 
-  function save(event: React.FormEvent) {
+  /*
+   * Persists the profile to the server.
+   *
+   * Only four fields are sent, because only four are accepted. `PATCH
+   * /users/me` is a strict schema, so an unknown key is a 400 rather than a
+   * silent no-op, and two of the six editable fields are deliberately excluded:
+   *
+   * - `email` is the login identity. Changing it is an account-verification
+   *   problem, not a profile field.
+   * - `department` is a text input, but a department is a foreign key. Syncing a
+   *   free-text value into it would need a name-to-id lookup and a
+   *   move-the-employee flow, which is not a settings toggle. It stays local.
+   *
+   * The avatar is a third exclusion: it is cropped client-side into a data URL
+   * of several kilobytes, and `avatarUrl` is capped at 1000 characters. Syncing
+   * it properly needs the file to be stored and a relation on the user, not a
+   * longer string.
+   */
+  const SYNCED_FIELDS = ['name', 'jobTitle', 'phone', 'bio'] as const;
+
+  async function save(event: React.FormEvent) {
     event.preventDefault();
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+
+    const patch: Record<string, string> = {};
+    for (const field of SYNCED_FIELDS) {
+      const value = me[field];
+      // `''` would be rejected by the schema for jobTitle/phone, which are
+      // nullable-but-not-empty. Clearing a field is expressed as null.
+      patch[field] = value ? value : '';
+    }
+
+    setSaving(true);
+    setSaveError(null);
+
+    try {
+      await api.updateMyProfile(patch);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (cause) {
+      setSaveError(cause instanceof ApiError ? cause.message : 'Could not save your profile.');
+    } finally {
+      setSaving(false);
+    }
   }
 
   function edit(patch: Partial<Person>) {
@@ -130,12 +172,22 @@ export function SettingsPanel() {
               </div>
 
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                <button className="join" type="submit">
-                  Save changes
+                <button className="join" type="submit" disabled={saving}>
+                  {saving ? 'Saving...' : 'Save changes'}
                 </button>
                 {saved && (
                   <span className="chip active">
-                    <Check size={11} /> Saved in this browser
+                    <Check size={11} /> Saved
+                  </span>
+                )}
+                {/*
+                  Errors get their own slot rather than replacing the success
+                  chip. A failed save that silently showed nothing would look
+                  exactly like a save that had not been attempted.
+                */}
+                {saveError && (
+                  <span className="form-error" role="alert">
+                    {saveError}
                   </span>
                 )}
               </div>

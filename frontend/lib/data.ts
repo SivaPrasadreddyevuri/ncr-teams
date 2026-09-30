@@ -184,8 +184,6 @@ export const channels: Channel[] = [
   { id: 'c10', name: 'random', teamName: 'General', teamId: 't8', lastMessage: 'Coffee recommendation thread.', lastAt: relativeIso(2000), unread: 0, memberIds: directory.map((p) => p.id) },
 ];
 
-export const channelById = (id: string) => channels.find((c) => c.id === id);
-
 /* ------------------------------------------------------------------ */
 /* Messages                                                            */
 /* ------------------------------------------------------------------ */

@@ -17,14 +17,6 @@ import { generateCsrfSecret, generateToken, hashToken } from './token.js';
 
 const SESSION_TTL_MS = config.SESSION_TTL_SECONDS * 1000;
 
-/**
- * Distinguishes a pending two-factor challenge from a live session.
- *
- * Both are rows in `Session`, so `resolveSession` must be able to tell them
- * apart; without this a challenge token presented as a cookie would authenticate.
- */
-export const PENDING_CHALLENGE_MARKER = 'pending-2fa-challenge';
-
 /** Deletes sessions that expired or were revoked more than a day ago. */
 export async function pruneExpiredSessions(now = new Date()): Promise<number> {
   const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -52,16 +44,7 @@ export async function issueSession(
   userAgent: string | null,
   now = new Date(),
 ): Promise<IssuedSession> {
-  await prisma.session.deleteMany({
-    where: {
-      userId,
-      revokedAt: null,
-      // Not a pending two-factor challenge. Those share this table, and
-      // completing a sign-in must not silently cancel a second, still-valid
-      // attempt from another device.
-      userAgent: { not: PENDING_CHALLENGE_MARKER },
-    },
-  });
+  await prisma.session.deleteMany({ where: { userId, revokedAt: null } });
 
   const token = generateToken();
   const csrfSecret = generateCsrfSecret();
@@ -111,10 +94,6 @@ export async function resolveSession(token: string | undefined) {
   });
 
   if (!session) return null;
-
-  // A pending 2FA challenge shares this table but is not a session. Returning
-  // null here is what stops a challenge token from authenticating.
-  if (session.userAgent === PENDING_CHALLENGE_MARKER) return null;
 
   if (session.revokedAt) {
     await prisma.session.delete({ where: { id: session.id } }).catch(() => undefined);

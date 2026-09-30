@@ -31,17 +31,6 @@ export async function ensureTestPasswords(): Promise<void> {
   prepared = true;
 }
 
-/** Turns on 2FA for a user and returns their base32 secret. */
-export async function enableTwoFactor(email: string): Promise<string> {
-  const { generateSecret } = await import('../src/auth/totp.js');
-  const secret = generateSecret();
-  await prisma.user.update({
-    where: { email },
-    data: { twoFactorEnabled: true, twoFactorSecret: secret },
-  });
-  return secret;
-}
-
 /** Removes every live session, so one test cannot leak into the next. */
 export async function clearSessions(): Promise<void> {
   await prisma.session.deleteMany({});

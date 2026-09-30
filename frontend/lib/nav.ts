@@ -70,7 +70,6 @@ export function canAccess(item: NavItem, role: Person['role']): boolean {
  */
 const EXTRA_TITLES: Record<string, string> = {
   '/meetings': 'Meetings',
-  '/verify-2fa': 'Security',
 };
 
 /** Page title for a pathname, falling back to the product name. */

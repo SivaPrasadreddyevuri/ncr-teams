@@ -176,11 +176,6 @@ export function useDirectory(): Person[] {
   );
 }
 
-/** Everyone, without the local edit overlay. */
-export function usePeople(): Person[] {
-  return useProfile().people;
-}
-
 /** The signed-in person, with local edits applied. */
 export function useActivePerson(): Person {
   const { activeUser } = useWorkspace();

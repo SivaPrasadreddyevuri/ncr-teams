@@ -11,19 +11,10 @@ import './setup-env.js';
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readJson, startHarness, type Harness } from './helpers.js';
-import {
-  EMPLOYEE,
-  HR_ADMIN,
-  TEST_PASSWORD,
-  clearSessions,
-  enableTwoFactor,
-  ensureTestPasswords,
-} from './fixtures.js';
-import { currentCode } from '../src/auth/totp.js';
-import { prisma } from '../src/db.js';
+import { EMPLOYEE, TEST_PASSWORD, clearSessions, ensureTestPasswords } from './fixtures.js';
 
 type ErrorBody = { error: { code: string; message: string; details?: Array<{ path: string }> } };
-type LoginBody = { user?: { email: string; role: string }; challengeToken?: string; expiresAt?: string };
+type LoginBody = { user?: { email: string; role: string }; expiresAt?: string };
 
 let harness: Harness;
 
@@ -35,23 +26,6 @@ before(async () => {
 after(async () => {
   await harness?.close();
 });
-
-/** Turns 2FA back off, so a failed test cannot poison the ones after it. */
-async function resetTwoFactor() {
-  await prisma.user.update({
-    where: { email: HR_ADMIN },
-    data: { twoFactorEnabled: false, twoFactorSecret: null },
-  });
-}
-
-/** Signs in and returns the challenge token, for a 2FA-enabled user. */
-async function challengeFor(email: string) {
-  const client = harness.client();
-  const response = await client.post('/api/auth/login', { email, password: TEST_PASSWORD });
-  const body = await readJson<LoginBody>(response);
-  assert.ok(body.challengeToken, `expected a challenge token, got ${response.status}`);
-  return { client, challengeToken: body.challengeToken };
-}
 
 describe('login', () => {
   it('signs in with correct credentials and sets both cookies', async () => {
@@ -159,86 +133,6 @@ describe('login', () => {
   });
 });
 
-describe('two-factor', () => {
-  it('returns a challenge instead of a session when 2FA is on', async () => {
-    const secret = await enableTwoFactor(HR_ADMIN);
-    const client = harness.client();
-
-    const response = await client.post('/api/auth/login', {
-      email: HR_ADMIN,
-      password: TEST_PASSWORD,
-    });
-    assert.equal(response.status, 200);
-
-    const body = await readJson<LoginBody>(response);
-    assert.ok(body.challengeToken, 'expected a challenge token');
-    // No session: the password alone must not be enough.
-    assert.equal(body.user, undefined);
-    assert.equal(
-      response.headers.getSetCookie().filter((c) => c.startsWith('ncr_session=')).length,
-      0,
-    );
-
-    const verified = await client.post('/api/auth/verify-2fa', {
-      challengeToken: body.challengeToken,
-      code: currentCode(secret),
-    });
-    assert.equal(verified.status, 200);
-    assert.equal((await readJson<LoginBody>(verified)).user?.email, HR_ADMIN);
-
-    await resetTwoFactor();
-  });
-
-  it('refuses a wrong code and issues no session', async () => {
-    const secret = await enableTwoFactor(HR_ADMIN);
-    const { client, challengeToken } = await challengeFor(HR_ADMIN);
-
-    const response = await client.post('/api/auth/verify-2fa', {
-      challengeToken,
-      // Whatever the real code is, this must not be it.
-      code: currentCode(secret) === '000000' ? '111111' : '000000',
-    });
-
-    assert.equal(response.status, 401);
-    assert.equal(
-      response.headers.getSetCookie().filter((c) => c.startsWith('ncr_session=')).length,
-      0,
-    );
-
-    await resetTwoFactor();
-  });
-
-  it('burns a challenge so a code cannot be replayed', async () => {
-    const secret = await enableTwoFactor(HR_ADMIN);
-    const { client, challengeToken } = await challengeFor(HR_ADMIN);
-
-    // First use succeeds, which consumes the row.
-    const first = await client.post('/api/auth/verify-2fa', {
-      challengeToken,
-      code: currentCode(secret),
-    });
-    assert.equal(first.status, 200);
-
-    // A code stays valid for its 30-second window, so without single use one
-    // observed code would allow several sessions.
-    const replay = await harness.client().post('/api/auth/verify-2fa', {
-      challengeToken,
-      code: currentCode(secret),
-    });
-    assert.equal(replay.status, 401, 'a consumed challenge must not work twice');
-
-    await resetTwoFactor();
-  });
-
-  it('rejects an expired or unknown challenge', async () => {
-    const response = await harness.client().post('/api/auth/verify-2fa', {
-      challengeToken: 'u1.thisisnotarealchallengeatall',
-      code: '123456',
-    });
-    assert.equal(response.status, 401);
-  });
-});
-
 describe('session', () => {
   it('identifies the caller on /me', async () => {
     const client = harness.client();
@@ -283,20 +177,6 @@ describe('session', () => {
     // Single-session policy: the old token is dead, the new one works.
     assert.equal((await first.get('/api/auth/me')).status, 401);
     assert.equal((await second.get('/api/auth/me')).status, 200);
-  });
-
-  it('does not treat a 2FA challenge as a session', async () => {
-    await enableTwoFactor(HR_ADMIN);
-    const { challengeToken } = await challengeFor(HR_ADMIN);
-
-    // A challenge token lives in the same table as sessions, so this is the
-    // check that stops it being usable as a session cookie.
-    const response = await harness.client().get('/api/auth/me', {
-      headers: { cookie: `ncr_session=${challengeToken}` },
-    });
-    assert.equal(response.status, 401);
-
-    await resetTwoFactor();
   });
 });
 
