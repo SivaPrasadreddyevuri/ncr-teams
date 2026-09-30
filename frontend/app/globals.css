@@ -2405,7 +2405,7 @@ button {
   }
 
   .sidebar {
-    width: 272px;
+    width: 199px;
     transform: translateX(-100%);
     transition: transform 0.24s ease;
     box-shadow: 0 0 40px #0d1b3233;
