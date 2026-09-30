@@ -1,4 +1,31 @@
 import { daysFromNow, localDayKey, relativeIso } from './format';
+import type { Channel, Person, Team } from './api';
+
+/**
+ * Seed data.
+ *
+ * This is the cold-start fallback: a visitor whose first load has no session, no
+ * cache and no reachable API still gets a populated app rather than an empty one.
+ * Once a screen is verified against the API, the fixtures stop being the source
+ * of truth for it -- but they stay here as the thing that renders before any
+ * request completes.
+ *
+ * ## Which types are imported, and which are not
+ *
+ * `Person`, `Team` and `Channel` are re-exported from `lib/api` rather than
+ * declared again. They were duplicated here once and the copies drifted: the
+ * fixture versions were narrower than the API's, because every seeded row
+ * happened to have a value where the API can return null. A duplicate type is a
+ * drift bug waiting to happen.
+ *
+ * `ActivityItem` is *not* shared, and deliberately so. The version below is
+ * presentation -- a `title` and a `subtitle` written once at seed time. The API
+ * returns structured `actor` and `target` instead, on the reasoning that prose
+ * frozen at seed time goes stale the moment anything is renamed. A screen
+ * reading activity from the API has to compose that prose itself, which is real
+ * work in the component rather than a type alias.
+ */
+export type { Channel, Person, Team };
 
 /**
  * Mock dataset.
@@ -14,24 +41,6 @@ import { daysFromNow, localDayKey, relativeIso } from './format';
 /* People                                                              */
 /* ------------------------------------------------------------------ */
 
-export type Person = {
-  id: string;
-  name: string;
-  email: string;
-  jobTitle: string | null;
-  employeeCode: string | null;
-  role: 'HR_ADMIN' | 'MANAGER' | 'EMPLOYEE';
-  department: string | null;
-  phone: string;
-  online: boolean;
-  bio: string;
-  /**
-   * Optional on purpose: it is required for exactly one person (the signed-in
-   * user, set by uploading a photo) and a required field would force it into
-   * all nine Person literals below for no benefit.
-   */
-  avatarUrl?: string;
-};
 
 export const currentUser: Person = {
   id: 'u1',
@@ -149,27 +158,7 @@ export const personById = (id: string) => directory.find((p) => p.id === id);
 /* Teams and channels                                                  */
 /* ------------------------------------------------------------------ */
 
-export type Channel = {
-  id: string;
-  name: string;
-  teamName: string;
-  teamId: string;
-  lastMessage: string;
-  lastAt: string;
-  unread: number;
-  memberIds: string[];
-};
 
-export type Team = {
-  id: string;
-  name: string;
-  description: string;
-  memberIds: string[];
-  memberCount: number;
-  channelCount: number;
-  mine: boolean;
-  myRole: 'OWNER' | 'ADMIN' | 'MEMBER';
-};
 
 export const teams: Team[] = [
   { id: 't1', name: 'Product Team', description: 'Product development and collaboration', memberIds: ['u1', 'u2', 'u3'], memberCount: 12, channelCount: 4, mine: true, myRole: 'OWNER' },

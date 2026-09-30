@@ -169,6 +169,41 @@ export type FileRow = {
   deletedAt: string | null;
 };
 
+export type Team = {
+  id: string;
+  name: string;
+  description: string;
+  memberIds: string[];
+  memberCount: number;
+  channelCount: number;
+  mine: boolean;
+  myRole: 'OWNER' | 'ADMIN' | 'MEMBER' | null;
+};
+
+export type Department = {
+  id: string;
+  name: string;
+  description: string;
+  head: string;
+  members: number;
+};
+
+export type ActivityTarget =
+  | { kind: 'message'; id: string; body: string; channelName: string | null }
+  | { kind: 'file'; id: string; name: string; sizeBytes: string }
+  | { kind: 'meeting'; id: string; title: string; startsAt: string }
+  | { kind: 'leave'; id: string; status: string; days: number; from: string; to: string }
+  | null;
+
+export type ActivityItem = {
+  id: string;
+  kind: 'MESSAGE' | 'FILE' | 'MEETING' | 'LEAVE' | 'MENTION';
+  read: boolean;
+  createdAt: string;
+  actor: { id: string; name: string; avatarUrl: string | null } | null;
+  target: ActivityTarget;
+};
+
 export const api = {
   /* auth */
   /**
@@ -198,10 +233,40 @@ export const api = {
     request<{ token: string; expiresAt: string; expiresInSeconds: number }>('/auth/ws-token'),
 
   /* people and structure */
-  users: () => request<{ users: Person[] }>('/users'),
-  teams: () => request<{ teams: unknown[] }>('/teams'),
-  channels: (teamId: string) =>
-    request<{ channels: Channel[] }>(`/channels?teamId=${encodeURIComponent(teamId)}`),
+  users: (signal?: AbortSignal) => request<{ users: Person[] }>('/users', { signal }),
+  teams: (signal?: AbortSignal) => request<{ teams: Team[] }>('/teams', { signal }),
+  channels: (teamId: string, signal?: AbortSignal) =>
+    request<{ channels: Channel[] }>(`/channels?teamId=${encodeURIComponent(teamId)}`, { signal }),
+
+  /**
+   * Channels across several teams, in parallel.
+   *
+   * `GET /channels` requires a `teamId` on purpose: an unfiltered listing would
+   * hand back channels from teams the caller is not in, and the guard against
+   * that is the parameter itself. So the Channels screen fans out instead of
+   * asking for everything. A handful of tiny parallel requests beats weakening a
+   * membership check.
+   */
+  channelsForTeams: async (teamIds: string[], signal?: AbortSignal): Promise<Channel[]> => {
+    if (teamIds.length === 0) return [];
+    const results = await Promise.all(
+      teamIds.map((teamId) => request<{ channels: Channel[] }>(
+        `/channels?teamId=${encodeURIComponent(teamId)}`,
+        { signal },
+      )),
+    );
+    return results.flatMap((result) => result.channels);
+  },
+  departments: (signal?: AbortSignal) =>
+    request<{ departments: Department[] }>('/departments', { signal }),
+  activity: (limit = 20, before?: string, signal?: AbortSignal) => {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (before) query.set('before', before);
+    return request<{ activity: ActivityItem[]; nextCursor: string | null }>(
+      `/activity?${query}`,
+      { signal },
+    );
+  },
   markChannelRead: (channelId: string) =>
     request<{ lastReadAt: string }>(`/channels/${encodeURIComponent(channelId)}/read`, {
       method: 'POST',

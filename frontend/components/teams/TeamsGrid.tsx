@@ -1,7 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Users, Plus, Check, X } from 'lucide-react';
+import { api } from '@/lib/api';
+import { useApiData } from '@/lib/useApiData';
 import type { Team } from '@/lib/data';
 
 export function TeamsGrid({
@@ -11,10 +13,26 @@ export function TeamsGrid({
   initialTeams: Team[];
   currentUserId: string;
 }) {
+  /*
+   * The seed arrives as a prop from the server component, so the grid renders
+   * immediately and the live list replaces it when the API answers. `local` is
+   * overridden on success because a team created in this browser has not been
+   * persisted, and the next fetch would silently drop it.
+   */
+  const { data } = useApiData<Team[]>(
+    'teams',
+    (signal) => api.teams(signal).then((r) => r.teams),
+    initialTeams,
+  );
+
   const [teams, setTeams] = useState<Team[]>(initialTeams);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+
+  useEffect(() => {
+    setTeams(data);
+  }, [data]);
 
   function create(event: React.FormEvent) {
     event.preventDefault();
@@ -72,7 +90,10 @@ export function TeamsGrid({
             <div className="members-line">
               {team.mine ? (
                 <span className="chip active">
-                  <Check size={11} /> {team.myRole.toLowerCase()}
+                  {/* `myRole` is null only when `mine` is false, but the two
+                      come from different fields and a server response is not
+                      obliged to be consistent. Fall back rather than crash. */}
+                  <Check size={11} /> {(team.myRole ?? 'member').toLowerCase()}
                 </span>
               ) : (
                 <button className="join" type="button" onClick={() => toggleJoin(team.id)}>

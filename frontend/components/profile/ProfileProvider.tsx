@@ -2,6 +2,8 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { directory, type Person } from '@/lib/data';
+import { api } from '@/lib/api';
+import { useApiData } from '@/lib/useApiData';
 import { readJson, storageKeys, writeJson } from '@/lib/storage';
 import { useWorkspace } from '@/components/workspace/WorkspaceProvider';
 
@@ -30,6 +32,8 @@ type ProfileValue = {
   ready: boolean;
   /** The full map, so resolvers can read it without re-parsing storage. */
   profiles: ProfileMap;
+  /** The directory: the API's answer, or the fixtures if it could not be reached. */
+  people: Person[];
   setProfile: (patch: Partial<EditableProfile>) => void;
   clearAvatar: () => void;
 };
@@ -83,17 +87,37 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     writeJson(storageKeys.profiles, profiles);
   }, [ready, profiles]);
 
+  /*
+   * The directory, live.
+   *
+   * This is the one place every screen gets people from -- avatars, member
+   * lists, message authors, the HR directory -- so wiring it here is what makes
+   * every one of those live at once, rather than a change per screen.
+   *
+   * The fixtures are the seed, so the first paint is identical to the server's
+   * and a visitor with no session still sees eight people rather than an empty
+   * sidebar. The two sources have the same ids (`u1`..`u8`), which is what lets
+   * the local profile overlay keep working across the swap.
+   */
+  const { data: people } = useApiData<Person[]>(
+    'users',
+    (signal) => api.users(signal).then((r) => r.users),
+    directory,
+  );
+
   const setProfile = useCallback(
     (patch: Partial<EditableProfile>) => {
       setProfiles((current) => {
-        const base = directory.find((person) => person.id === activeUserId);
+        // `people`, not the fixture: a profile edit for someone the API returned
+        // but the seed does not contain would otherwise be silently dropped.
+        const base = people.find((person) => person.id === activeUserId);
         const previous = current[activeUserId] ?? (base ? editableOf(base) : undefined);
         if (!previous) return current;
 
         return { ...current, [activeUserId]: { ...previous, ...patch } };
       });
     },
-    [activeUserId],
+    [activeUserId, people],
   );
 
   const clearAvatar = useCallback(() => {
@@ -110,8 +134,8 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   }, [activeUserId]);
 
   const value = useMemo(
-    () => ({ ready, profiles, setProfile, clearAvatar }),
-    [ready, profiles, setProfile, clearAvatar],
+    () => ({ ready, profiles, people, setProfile, clearAvatar }),
+    [ready, profiles, people, setProfile, clearAvatar],
   );
 
   return <ProfileContext.Provider value={value}>{children}</ProfileContext.Provider>;
@@ -140,14 +164,21 @@ export function useResolvedPerson(person: Person | null | undefined): Person | n
   return overlay(person, profiles);
 }
 
-/** The directory with local edits applied. */
+/** The directory with local edits applied. Live where the API answered. */
 export function useDirectory(): Person[] {
-  const { ready, profiles } = useProfile();
+  const { ready, profiles, people } = useProfile();
 
+  // `people` is the API's answer when it succeeded and the fixtures otherwise --
+  // the hook seeds it that way, so this does not need to know which.
   return useMemo(
-    () => (ready ? directory.map((person) => overlay(person, profiles)) : directory),
-    [ready, profiles],
+    () => (ready ? people.map((person) => overlay(person, profiles)) : people),
+    [ready, people, profiles],
   );
+}
+
+/** Everyone, without the local edit overlay. */
+export function usePeople(): Person[] {
+  return useProfile().people;
 }
 
 /** The signed-in person, with local edits applied. */
