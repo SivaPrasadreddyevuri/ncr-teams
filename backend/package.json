@@ -13,7 +13,8 @@
     "test": "node --import tsx --test --test-concurrency=1 \"test/*.test.ts\"",
     "user:password": "node --import tsx scripts/set-password.ts",
     "demo:signin": "node --import tsx scripts/set-password.ts --all --password showcase-2026",
-    "demo:files": "node --import tsx scripts/materialise-demo-files.ts"
+    "demo:files": "node --import tsx scripts/materialise-demo-files.ts",
+    "smoke": "node --import tsx scripts/smoke.ts"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.0.2",

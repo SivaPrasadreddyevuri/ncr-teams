@@ -8,6 +8,7 @@ import { PersonAvatar } from '@/components/profile/PersonAvatar';
 import { ProfileProvider } from '@/components/profile/ProfileProvider';
 import { WorkspaceProvider, useWorkspace } from '@/components/workspace/WorkspaceProvider';
 import { directory, type Person } from '@/lib/data';
+import { api, ApiError } from '@/lib/api';
 
 const ROLE_LABEL: Record<Person['role'], string> = {
   HR_ADMIN: 'HR',
@@ -18,10 +19,11 @@ const ROLE_LABEL: Record<Person['role'], string> = {
 /**
  * Personas offered on the sign-in screen.
  *
- * A prototype has no real authentication, so who you are has to be chosen
- * explicitly -- otherwise every visitor is the same person and the role-based
- * parts of the app cannot be demonstrated at all. The chosen id is what decides
- * which nav items appear and which pages open.
+ * The account is now real, so the picker no longer decides who you are -- it
+ * decides which seeded account's email is prefilled, and the password is checked
+ * by the API. It is kept because a showcase needs a way to demonstrate the
+ * role-gated parts of the app, and because it makes the email field useful
+ * without a visitor having to know an address.
  */
 const PERSONAS = directory.filter((person) =>
   person.role === 'HR_ADMIN' ? true : person.role === 'MANAGER' ? true : person.id === 'u1',
@@ -50,11 +52,34 @@ function LoginFormInner() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // A two-step sign-in: the password is correct but the account has a second
+  // factor, so the API hands back a challenge instead of a session.
+  const [challenge, setChallenge] = useState<string | null>(null);
+  const [code, setCode] = useState('');
+
   const persona = directory.find((person) => person.id === personaId) ?? activeUser;
 
-  function submit(event: React.FormEvent) {
+  async function submit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
+
+    if (challenge) {
+      if (!code.trim()) {
+        setError('Enter the code from your authenticator app.');
+        return;
+      }
+      setBusy(true);
+      try {
+        await api.loginWithTwoFactor(challenge, code.trim());
+        signIn(personaId);
+        router.push('/');
+      } catch (cause) {
+        setError(cause instanceof ApiError ? cause.message : 'Could not verify that code.');
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
 
     if (!email.trim() || !password) {
       setError('Enter an email and password to continue.');
@@ -62,22 +87,42 @@ function LoginFormInner() {
     }
 
     setBusy(true);
-    // Prototype: any credentials are accepted and nothing is sent anywhere.
-    // Signing in is just choosing which persona the app should act as.
-    signIn(personaId);
-    setTimeout(() => router.push('/'), 350);
+    try {
+      const result = await api.login(email.trim(), password);
+
+      // A challenge means the password was right and 2FA is still outstanding.
+      // No session has been issued at this point.
+      if (result.challengeToken) {
+        setChallenge(result.challengeToken);
+        setError(null);
+        return;
+      }
+
+      // The persona is what drives role gating across the app; the cookie set by
+      // the API is what authenticates the request. Both are needed.
+      signIn(personaId);
+      router.push('/');
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : 'Could not sign in. Try again.');
+    } finally {
+      setBusy(false);
+    }
   }
+
+  const demoEmail = process.env.NEXT_PUBLIC_DEMO_EMAIL;
+  const demoPassword = process.env.NEXT_PUBLIC_DEMO_PASSWORD;
 
   return (
     <form onSubmit={submit} noValidate>
-      <div className="persona-picker">
-        <p className="persona-picker-label">Sign in as</p>
-        {PERSONAS.map((option) => (
-          <button
-            key={option.id}
-            className="persona-option"
-            type="button"
-            onClick={() => {
+      {!challenge && (
+        <div className="persona-picker">
+          <p className="persona-picker-label">Sign in as</p>
+          {PERSONAS.map((option) => (
+            <button
+              key={option.id}
+              className="persona-option"
+              type="button"
+              onClick={() => {
               setPersonaId(option.id);
               setEmail(option.email);
             }}
@@ -92,54 +137,75 @@ function LoginFormInner() {
           </button>
         ))}
       </div>
+      )}
 
-      <div className="form-field">
-        <label htmlFor="login-email">Work email</label>
-        <input
-          id="login-email"
-          type="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          placeholder="you@company.com"
-          autoComplete="email"
-        />
-      </div>
-
-      <div className="form-field">
-        <label htmlFor="login-password">Password</label>
-        <div className="field-wrap">
+      {challenge ? (
+        <div className="form-field">
+          <label htmlFor="login-code">Authentication code</label>
           <input
-            id="login-password"
-            type={show ? 'text' : 'password'}
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="Enter your password"
-            autoComplete="current-password"
+            id="login-code"
+            value={code}
+            onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+            placeholder="000000"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            autoFocus
           />
-          <button
-            type="button"
-            onClick={() => setShow((current) => !current)}
-            aria-label={show ? 'Hide password' : 'Show password'}
-          >
-            {show ? <EyeOff size={16} /> : <Eye size={16} />}
-          </button>
+          <p className="auth-hint">
+            Open your authenticator app for the six-digit code.
+          </p>
         </div>
-      </div>
+      ) : (
+        <>
+          <div className="form-field">
+            <label htmlFor="login-email">Work email</label>
+            <input
+              id="login-email"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="you@company.com"
+              autoComplete="email"
+            />
+          </div>
 
-      <div className="auth-row">
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={remember}
-            onChange={(event) => setRemember(event.target.checked)}
-          />
-          <span>Remember me</span>
-        </label>
+          <div className="form-field">
+            <label htmlFor="login-password">Password</label>
+            <div className="field-wrap">
+              <input
+                id="login-password"
+                type={show ? 'text' : 'password'}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="Enter your password"
+                autoComplete="current-password"
+              />
+              <button
+                type="button"
+                onClick={() => setShow((current) => !current)}
+                aria-label={show ? 'Hide password' : 'Show password'}
+              >
+                {show ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+          </div>
 
-        <Link className="auth-inline-link" href="/forgot-password">
-          Forgot password?
-        </Link>
-      </div>
+          <div className="auth-row">
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={remember}
+                onChange={(event) => setRemember(event.target.checked)}
+              />
+              <span>Remember me</span>
+            </label>
+
+            <Link className="auth-inline-link" href="/forgot-password">
+              Forgot password?
+            </Link>
+          </div>
+        </>
+      )}
 
       {error && (
         <p className="form-error" role="alert">
@@ -149,10 +215,31 @@ function LoginFormInner() {
 
       <button className="primary auth-submit" type="submit" disabled={busy}>
         <LogIn size={16} />
-        {busy ? 'Signing in...' : 'Sign in'}
+        {busy ? 'Signing in...' : challenge ? 'Verify' : 'Sign in'}
       </button>
 
-      <p className="auth-hint">Prototype build &mdash; any credentials are accepted.</p>
+      {/*
+        Shown only when the deployment sets the demo credentials. A showcase
+        viewer should be able to sign in without reading a README, and the value
+        is public either way -- it is displayed here on purpose rather than
+        hidden in a source file. Leave the variables unset and this is not
+        rendered at all.
+      */}
+      {!challenge && demoEmail && demoPassword && (
+        <p className="auth-hint">
+          Demo account: <strong>{demoEmail}</strong> / <code>{demoPassword}</code>{' '}
+          <button
+            type="button"
+            className="auth-inline-link"
+            onClick={() => {
+              setEmail(demoEmail);
+              setPassword(demoPassword);
+            }}
+          >
+            Fill in
+          </button>
+        </p>
+      )}
     </form>
   );
 }

@@ -250,31 +250,47 @@ succeeds.
 ## Demo sign-in
 
 ```bash
-npm run demo:signin --workspace backend   # one shared password for all 8 users
-npm run demo:files  --workspace backend   # real bytes behind the 9 seeded files
+npm run db:demo          # reset + seed + passwords + file bytes, in one command
 ```
 
-The seed deliberately leaves `passwordHash` null, so nobody can sign in until one
-is set. `demo:signin` is the bulk form of `user:password`; it defaults to
-`showcase-2026`, which is committed in `package.json` and shown on the login
-page. **That is deliberate and it is a public credential** — anyone who can load
-the page can sign in either way, so hiding it buys nothing. Do not reuse the
-value for anything real; `user:password --random` prints a fresh one for a
-genuine account.
+which is `db:reset`, then `demo:signin`, then `demo:files`. The three have to run
+in that order: the seed truncates the database, so it wipes any password and
+leaves the seeded file rows with no content. Running only `db:seed` produces a
+database nobody can sign in to, which is a confusing thing to discover.
+
+`demo:signin` sets one shared password for all eight users; `demo:files` writes
+real bytes behind the nine seeded files. Both are idempotent and safe to re-run,
+which matters because on the free tier they need re-running after every deploy.
+
+The seed deliberately leaves `passwordHash` null, so the database has to be
+bootstrapped before anyone can authenticate. `demo:signin` is the bulk form of
+`user:password`; it defaults to `showcase-2026`, which is committed in
+`package.json` and shown on the login page. **That is deliberate and it is a
+public credential** — anyone who can load the page can sign in either way, so
+hiding it buys nothing. Do not reuse the value for anything real;
+`user:password --random` prints a fresh one for a genuine account.
 
 Set `NEXT_PUBLIC_DEMO_EMAIL` / `NEXT_PUBLIC_DEMO_PASSWORD` in the frontend so the
 login page shows the credentials.
 
-`demo:files` exists because the seed creates file *rows* with no content, which
-leaves every download in the demo returning 410. It writes a genuinely valid
-minimal PDF, a real PNG and JPEG, and real Markdown, keyed to the seeded
-`storageKey`s. `.fig` and `.pptx` get a short text stub instead: a valid download
-that opens in a text editor, which is honest and still not a broken button. The
-PDF is assembled with real cross-reference byte offsets, so it is a valid PDF and
-not merely a plausible one.
+`demo:files` writes a genuinely valid minimal PDF, a real PNG and JPEG, and real
+Markdown, keyed to the seeded `storageKey`s. `.fig` and `.pptx` get a short text
+stub instead: a valid download that opens in a text editor, which is honest and
+still not a broken button. The PDF is assembled with real cross-reference byte
+offsets, so it is a valid PDF and not merely a plausible one.
 
-Both are idempotent and safe to re-run — which matters, because on the free tier
-they need re-running after every deploy.
+## Smoke test
+
+```bash
+npm run dev:api     # in one terminal
+npm run smoke       # in another
+```
+
+Drives the whole browser-facing flow over real HTTP against a running instance:
+sign in, the CSRF requirement, the message thread, posting a message, the
+WebSocket handshake, a file upload and download round trip, and logout. The
+integration suite proves the same behaviours against a harness it starts itself;
+this one proves them against the process you would actually deploy.
 
 ## Tests
 

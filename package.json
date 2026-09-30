@@ -16,6 +16,9 @@
     "preview": "npm run build --workspace frontend && npm run start --workspace frontend",
     "typecheck": "npm run typecheck --workspace frontend && npm run typecheck --workspace backend && npm run typecheck --workspace database",
     "test": "npm run test --workspace backend",
+    "demo:signin": "npm run demo:signin --workspace backend",
+    "demo:files": "npm run demo:files --workspace backend",
+    "smoke": "npm run smoke --workspace backend",
     "postinstall": "npm run db:generate",
     "db:generate": "npm run generate --workspace database",
     "db:validate": "npm run validate --workspace database",
@@ -26,7 +29,8 @@
     "db:seed": "npm run seed --workspace database",
     "db:verify": "npm run verify --workspace database",
     "db:studio": "npm run studio --workspace database",
-    "db:bootstrap": "npm run bootstrap --workspace database"
+    "db:bootstrap": "npm run bootstrap --workspace database",
+    "db:demo": "npm run db:reset && npm run demo:signin && npm run demo:files"
   },
   "engines": {
     "node": "24.x"
