@@ -11,11 +11,14 @@
     "typecheck": "tsc --noEmit",
     "pretest": "node --import tsx test/prepare-db.ts",
     "test": "node --import tsx --test --test-concurrency=1 \"test/*.test.ts\"",
-    "user:password": "node --import tsx scripts/set-password.ts"
+    "user:password": "node --import tsx scripts/set-password.ts",
+    "demo:signin": "node --import tsx scripts/set-password.ts --all --password showcase-2026",
+    "demo:files": "node --import tsx scripts/materialise-demo-files.ts"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.0.2",
     "@prisma/client": "6.19.3",
+    "busboy": "^1.6.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
@@ -23,6 +26,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@types/busboy": "^1.5.4",
     "@types/cookie-parser": "^1.4.8",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",

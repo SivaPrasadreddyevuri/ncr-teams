@@ -44,6 +44,32 @@ async function prompt(question: string): Promise<string> {
 }
 
 async function main() {
+  // Bulk mode: one shared password for every user, for a demo where a reviewer
+  // needs to sign in as whoever they are looking at. Printed at the end, because
+  // a password nobody knows is not a demo credential.
+  if (flag('all')) {
+    const password = arg('password') ?? (flag('random') ? randomBytes(12).toString('base64url') : undefined);
+    if (!password) {
+      console.error('Usage: npm run user:password -- --all --password <pw> | --random');
+      process.exitCode = 1;
+      return;
+    }
+    if (!isAcceptablePassword(password)) {
+      console.error(`Too short: ${MIN_PASSWORD_LENGTH} characters minimum.`);
+      process.exitCode = 1;
+      return;
+    }
+
+    const passwordHash = await hashPassword(password);
+    const { count } = await prisma.user.updateMany({
+      data: { passwordHash, mustChangePassword: false },
+    });
+
+    console.log(`Set the same password for ${count} users.`);
+    if (flag('random')) console.log(`  password: ${password}`);
+    return;
+  }
+
   const email = arg('email')?.trim().toLowerCase();
   if (!email) {
     console.error('Usage: npm run user:password -- --email <address> [--password <pw> | --random]');

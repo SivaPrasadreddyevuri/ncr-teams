@@ -112,6 +112,38 @@ export class Client {
     assert2xx(response, path);
     return readJson<T>(response);
   }
+
+  /**
+   * Multipart upload.
+   *
+   * `FormData` is passed straight to fetch, which sets `content-type` itself
+   * including the boundary. Setting it by hand as `multipart/form-data` omits the
+   * boundary, and the server then cannot find where the body starts -- which
+   * looks like a malformed request rather than a missing header.
+   */
+  async upload(
+    path: string,
+    form: FormData,
+    options: { withCsrf?: boolean } = {},
+  ): Promise<Response> {
+    const headers: Record<string, string> = {};
+    const cookie = this.cookieHeader();
+    if (cookie) headers.cookie = cookie;
+
+    if (options.withCsrf !== false) {
+      const token = this.csrfToken();
+      if (token) headers['x-csrf-token'] = token;
+    }
+
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method: 'POST',
+      headers,
+      body: form,
+      redirect: 'manual',
+    });
+    this.absorbCookies(response);
+    return response;
+  }
 }
 
 /** Fails loudly with the body, which a bare `await response.json()` would not. */

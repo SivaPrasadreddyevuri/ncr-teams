@@ -46,4 +46,13 @@ process.env.DIRECT_DATABASE_URL = testUrl;
 process.env.SESSION_PEPPER = process.env.SESSION_PEPPER ?? 'test-pepper-fixed-value-32-chars-long';
 process.env.CORS_ORIGINS = '';
 
+// A separate directory, so a test run cannot delete or overwrite the uploaded
+// files sitting in the development store. It is still inside backend/, so the
+// gitignore rule covers it.
+process.env.STORAGE_DIR = process.env.STORAGE_DIR ?? 'var/uploads-test';
+
+// 4 KB, so the size-cap test allocates a few kilobytes rather than the 50 MB
+// default. Large enough for the fixtures used elsewhere in the suite.
+process.env.MAX_UPLOAD_BYTES = process.env.MAX_UPLOAD_BYTES ?? '4096';
+
 export { TEST_DATABASE, testUrl };

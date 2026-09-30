@@ -61,6 +61,26 @@ const schema = z
     CORS_ORIGINS: z.string().default('http://localhost:3000'),
 
     /**
+     * Where uploaded bytes live.
+     *
+     * Relative paths resolve against the process working directory, so this is
+     * only predictable if the service is started from `backend/` -- which both
+     * the npm script and Render's `startCommand` do. Overridable so a deployment
+     * can point at a mounted volume instead.
+     */
+    STORAGE_DIR: z.string().default('var/uploads'),
+
+    /**
+     * Largest accepted upload.
+     *
+     * Enforced while streaming, not after, so an oversized body is abandoned
+     * part-way rather than being received in full first. 50 MB is generous for a
+     * workspace attachment and small enough that a free-tier instance will not be
+     * killed by one request.
+     */
+    MAX_UPLOAD_BYTES: z.coerce.number().int().min(1024).default(50 * 1024 * 1024),
+
+    /**
      * Number of reverse proxies in front of this service. Render terminates TLS
      * and forwards one hop, so this is 1 in production.
      *

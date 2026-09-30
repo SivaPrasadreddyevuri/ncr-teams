@@ -115,9 +115,9 @@ const meetingMessages = [
 // One row per (message, emoji, user). The fixtures group these as
 // `{ emoji, userIds }`, which is a read shape, not a write shape.
 const reactions = [
-  { id: 'r1', messageId: 'm3', emoji: 'Ã°Å¸â€˜Â', userId: 'u2' },
-  { id: 'r2', messageId: 'm3', emoji: 'Ã°Å¸â€˜Â', userId: 'u4' },
-  { id: 'r3', messageId: 'm7', emoji: 'Ã°Å¸Å½â€°', userId: 'u3' },
+  { id: 'r1', messageId: 'm3', emoji: '👍', userId: 'u2' },
+  { id: 'r2', messageId: 'm3', emoji: '👍', userId: 'u4' },
+  { id: 'r3', messageId: 'm7', emoji: '🎉', userId: 'u3' },
 ];
 
 /* ------------------------------------------------------------------ */

@@ -3,9 +3,8 @@
 Express 5 + TypeScript API for NCR Teams. Deployed to Render; the database is
 Neon Postgres.
 
-**Status: foundation, auth and read paths built.** Messages, files, meetings,
-attendance, leave, search and the WebSocket are Phase 2b — the contract below is
-written down and unchanged, but those routes do not exist yet.
+**Status: foundation, auth, read paths, messages and files are built.** Meetings,
+calendar, attendance, leave, search and the WebSocket are Phase 2c.
 
 ## What exists
 
@@ -18,9 +17,74 @@ written down and unchanged, but those routes do not exist yet.
 | Channels | `GET /api/channels?teamId=`, `POST /api/channels/:id/read` |
 | Departments | `GET /api/departments` |
 | Activity | `GET /api/activity?limit=&before=` |
+| Messages | `GET/POST /api/messages`, `POST /api/messages/:id/reactions`, `DELETE /api/messages/:id` |
+| Files | `GET /api/files`, `POST /api/files`, `GET /api/files/:id/download`, `POST /api/files/:id/star`, `DELETE /api/files/:id` |
 
 `GET /api/activity` resolves each notification's target, so the feed is built
 from structured fields rather than the frozen prose the fixtures carried.
+
+## Messages
+
+**Cursor pagination, not `OFFSET`.** `OFFSET` re-counts from the start each page,
+so a message arriving mid-scroll shifts the window: the reader sees a duplicate
+at one end and a gap at the other. The cursor is the `(createdAt, id)` pair the
+previous page ended on, base64url-encoded so a client cannot construct an invalid
+one. The `id` tiebreak matters — two messages can share a `createdAt` millisecond,
+and a timestamp-only comparison drops one.
+
+**Soft delete.** `DELETE` empties the body and sets `deletedAt`; the row stays.
+A hard delete would leave every reply pointing at nothing and renumber the
+thread. Reactions on a tombstone are refused, so deleted content cannot be
+surfaced again by an emoji.
+
+**Reactions** are one row per `(user, message, emoji)` — the only shape that can
+prevent a double-tap creating two identical rows — and are grouped into
+`{ emoji, userIds }` on the way out, which is the read shape the fixture uses.
+
+## Files
+
+Bytes live on local disk under `backend/var/uploads`; `File.storageKey` is a
+server-generated key. Three properties are load-bearing:
+
+- **A key never becomes a path unchecked.** `resolveKey` resolves it and then
+  confirms the result is still inside the root, so `../`, an absolute path, a
+  null byte, and the sibling-directory case (`uploads-evil` beside `uploads`, which
+  a plain `startsWith` would accept) are all rejected.
+- **The filename never reaches the key.** Only the name is honoured, and only as
+  a short alphanumeric extension. A double extension is truncated to the last
+  one. The original name is stored as a label and sanitised before going into
+  `Content-Disposition`.
+- **Uploads stream, and the cap is busboy's.** A multipart body is piped straight
+  to disk and counted in flight. busboy owns the limit because it truncates the
+  part and keeps parsing, so the 413 is actually delivered — an earlier version
+  let the byte counter destroy the stream first, which killed the parser, so
+  `close` never fired and the request hung until the client gave up.
+
+**Missing bytes are a 410, not a 404.** A row can outlive its content here (see
+below), and "gone" is a different situation from "never existed"; the client can
+say something useful about each. `FileDto.uploaded` reports the same thing in a
+listing, so a row with no content does not render as a working download button.
+
+### Ephemeral by design
+
+Render's free tier wipes the filesystem on every deploy and instance restart.
+Database rows survive, so a row whose bytes are gone is a normal state here, not
+an edge case. Uploads therefore do not persist across a deploy.
+
+That is a deliberate simplification for a showcase. Cloudflare R2 is the fix if
+this ever needs to outlive a deploy, and the account is already needed for TURN;
+it was skipped because it buys nothing a viewer of the demo would notice.
+
+## Realtime bus
+
+`src/realtime/bus.ts` is a typed in-process emitter. The message and file routes
+publish to it; Phase 2c subscribes a WebSocket broadcaster to the same events.
+That keeps `ws` out of the request path, so the broadcast contract is testable
+without a listening server.
+
+Events are in-process only: a `message.created` on one instance does not reach a
+browser on another. Correct for a single instance, and a Redis pub/sub fan-out at
+this exact seam is the change if it is ever more than one.
 
 ## Stack, and where it changed
 
@@ -133,11 +197,43 @@ development, where the two run on different ports.
 The rewrite is inert until `API_ORIGIN` is set, so a build without it still
 succeeds.
 
+## Demo sign-in
+
+```bash
+npm run demo:signin --workspace backend   # one shared password for all 8 users
+npm run demo:files  --workspace backend   # real bytes behind the 9 seeded files
+```
+
+The seed deliberately leaves `passwordHash` null, so nobody can sign in until one
+is set. `demo:signin` is the bulk form of `user:password`; it defaults to
+`showcase-2026`, which is committed in `package.json` and shown on the login
+page. **That is deliberate and it is a public credential** — anyone who can load
+the page can sign in either way, so hiding it buys nothing. Do not reuse the
+value for anything real; `user:password --random` prints a fresh one for a
+genuine account.
+
+Set `NEXT_PUBLIC_DEMO_EMAIL` / `NEXT_PUBLIC_DEMO_PASSWORD` in the frontend so the
+login page shows the credentials.
+
+`demo:files` exists because the seed creates file *rows* with no content, which
+leaves every download in the demo returning 410. It writes a genuinely valid
+minimal PDF, a real PNG and JPEG, and real Markdown, keyed to the seeded
+`storageKey`s. `.fig` and `.pptx` get a short text stub instead: a valid download
+that opens in a text editor, which is honest and still not a broken button. The
+PDF is assembled with real cross-reference byte offsets, so it is a valid PDF and
+not merely a plausible one.
+
+Both are idempotent and safe to re-run — which matters, because on the free tier
+they need re-running after every deploy.
+
 ## Tests
 
 ```bash
 npm test --workspace backend
 ```
+
+112 tests: auth and session behaviour, the read endpoints, messages, files,
+storage containment, and an encoding guard.
 
 `node:test`, no framework — the repo has none, and the earlier frontend ad-hoc
 scripts were removed for exactly that reason.
@@ -150,16 +246,21 @@ The app is mounted on an ephemeral port and driven over HTTP, not called
 directly, because the things most likely to break — cookie flags, CSRF, status
 codes, BigInt serialisation — all live in the middleware and the response path.
 
-Signed-in users come from `test/fixtures.ts`, which sets a password the seed
-deliberately leaves null. Argon2 at 19 MiB is slow enough that the suite shares
-one hash across fixtures; salting means each stored value is still distinct.
+Tests set up their own preconditions rather than assuming a pristine database, so
+the suite is safe to run repeatedly without a re-seed in between. Three separate
+bugs here were tests that passed once and failed on the second run.
+
+### The encoding guard
+
+`test/encoding.test.ts` fails on any double-encoded UTF-8 in the source tree.
+Windows PowerShell's `Get-Content -Raw` reads with the ANSI codepage, so
+reading a UTF-8 file and writing it back silently re-encodes every non-ASCII
+character. That corrupted a reaction emoji in the seed and an em dash in a CSS
+comment, and nothing noticed: the seed ran, the tests passed, and the database
+held the wrong bytes. There is no linter here to catch it, so a test does.
 
 ## Not yet built
 
-Everything else in the contract: messages, reactions, file upload, meetings,
-calendar, attendance, leave, search, and the `/ws` endpoint with presence.
-
-File storage is the open design question. The plan is server disk, but **Render's
-free tier filesystem is ephemeral** — uploads are lost on every deploy and on
-instance restart. Cloudflare R2 is the natural fit and the account is already
-needed for TURN. This is a 2b decision, not a 2a one.
+Meetings, calendar, attendance, leave, HR actions, search, and the `/ws`
+endpoint with presence. Those pages still render from the frontend fixtures, which
+already look correct, so they are deliberately not wired yet.
