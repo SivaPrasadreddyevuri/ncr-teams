@@ -1,0 +1,6 @@
+-- AlterTable
+ALTER TABLE "File" ADD COLUMN     "isFolder" BOOLEAN NOT NULL DEFAULT false;
+
+-- AlterTable
+ALTER TABLE "LeaveRequest" ALTER COLUMN "fromDate" SET DATA TYPE TIMESTAMP(3),
+ALTER COLUMN "toDate" SET DATA TYPE TIMESTAMP(3);

@@ -34,3 +34,55 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  database:
+    name: Migrations and seed
+    runs-on: ubuntu-latest
+
+    # A real PostgreSQL, so the migrations are exercised rather than just parsed.
+    # A migration that applies locally but not on a clean instance is a defect
+    # that otherwise surfaces at deploy time, which is the worst place to find it.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # Pointed at a throwaway name: this job creates and drops it freely, and
+      # it must never be mistakable for a real database.
+      DATABASE_URL: postgresql://ncr_app:ncr_app_ci@127.0.0.1:5432/ncr_teams_ci?schema=public
+      POSTGRES_SUPERUSER_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Create the application role and database
+        run: npm run db:bootstrap
+
+      # `migrate deploy`, not `migrate dev`: dev would try to create a shadow
+      # database and prompt for a migration name, neither of which belongs in CI.
+      - name: Apply migrations
+        run: npm run db:deploy
+
+      - name: Seed
+        run: npm run db:seed
+
+      - name: Verify the seeded data
+        run: npm run db:verify

@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "echo \"No implementation yet - see backend/README.md\" && exit 1",
     "build": "echo \"No implementation yet - see backend/README.md\" && exit 1",
-    "start": "echo \"No implementation yet - see backend/README.md\" && exit 1"
+    "start": "echo \"No implementation yet - see backend/README.md\" && exit 1",
+    "typecheck": "echo \"No sources yet - see backend/README.md\""
   }
 }

@@ -1,0 +1,537 @@
+// NCR Teams — relational schema.
+//
+// The shape follows `frontend/lib/data.ts` closely, because those fixtures are
+// what the UI renders and the API will eventually return. Where the original
+// draft disagreed with the frontend, the frontend won: every divergence is
+// called out below so the next reader does not have to rediscover it.
+//
+// Two conventions worth stating up front:
+//
+// - `id` is `cuid()` throughout, not `uuid`. cuid() is a short, sortable,
+//   URL-safe id, which suits a REST resource better than a 36-char uuid.
+// - `sizeBytes` on File is `BigInt`, because a file can exceed 2^31 bytes.
+//   BigInt **throws on JSON.stringify**, so every API response must convert it
+//   to a string or number. See backend/src/serialise.ts.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/* ------------------------------------------------------------------ */
+/* Enums                                                               */
+/* ------------------------------------------------------------------ */
+
+// `GUEST` was in the original draft. The frontend's `Team.myRole` type is
+// `'OWNER' | 'ADMIN' | 'MEMBER'`, so keeping it would mean the type and the
+// database could disagree.
+enum MemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum ChannelType {
+  STANDARD
+  PRIVATE
+}
+
+enum EventType {
+  MEETING
+  EVENT
+}
+
+enum UserRole {
+  HR_ADMIN
+  MANAGER
+  EMPLOYEE
+}
+
+enum EmploymentStatus {
+  ACTIVE
+  ON_NOTICE
+  NOTICE_PERIOD
+  EXITED
+}
+
+// These five must match `LEAVE_TYPES` in frontend/lib/data.ts exactly. The
+// draft used CASUAL / MATERNITY / PATERNITY, which the leave form would have
+// been rejected on insert.
+enum LeaveType {
+  ANNUAL
+  SICK
+  PERSONAL
+  PARENTAL
+  UNPAID
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum AttendanceStatus {
+  PRESENT
+  LATE
+  REMOTE
+  ABSENT
+  HALF_DAY
+}
+
+enum AuditAction {
+  EMPLOYEE_CREATED
+  EMPLOYEE_UPDATED
+  EMPLOYEE_DEACTIVATED
+  LEAVE_SUBMITTED
+  LEAVE_APPROVED
+  LEAVE_REJECTED
+  ATTENDANCE_RECORDED
+  PASSWORD_RESET
+}
+
+// Mirrors `ActivityItem['kind']` in the frontend.
+enum NotificationKind {
+  MESSAGE
+  FILE
+  MEETING
+  LEAVE
+  MENTION
+}
+
+/* ------------------------------------------------------------------ */
+/* Identity                                                            */
+/* ------------------------------------------------------------------ */
+
+model User {
+  id            String @id @default(cuid())
+  name          String
+  email         String @unique
+  // Nullable so an invited account exists before it has a credential.
+  passwordHash  String?
+  // Named to match `Person.avatarUrl` rather than NextAuth's `image`, so the API
+  // layer can hand the column to the UI without a rename in one direction.
+  avatarUrl     String?
+  bio           String?
+  // The boolean was in the draft but the secret was not, which makes TOTP
+  // impossible: `/verify-2fa` would have nothing to check against.
+  twoFactorEnabled Boolean @default(false)
+  twoFactorSecret  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  role             UserRole         @default(EMPLOYEE)
+  employeeCode     String?          @unique
+  jobTitle         String?
+  phone            String?
+  joinedAt         DateTime?
+  employmentStatus EmploymentStatus @default(ACTIVE)
+  mustChangePassword Boolean        @default(false)
+
+  managerId String?
+  manager   User?   @relation("ManagerReports", fields: [managerId], references: [id], onDelete: SetNull)
+  reports   User[]  @relation("ManagerReports")
+
+  departmentId String?
+  department   Department? @relation("DepartmentMembers", fields: [departmentId], references: [id], onDelete: SetNull)
+  headedDepartments Department[] @relation("DepartmentHead")
+
+  memberships      TeamMember[]
+  channelStates    ChannelReadState[]
+  messages         Message[]
+  reactions        Reaction[]
+  meetings         MeetingParticipant[]
+  organizedMeetings Meeting[]      @relation("MeetingOrganizer")
+  events           CalendarEvent[] @relation("EventOrganizer")
+  eventAttendees   CalendarAttendee[]
+  uploadedFiles    File[]
+  starredFiles     File[]         @relation("FileStarredBy")
+
+  leaveRequests LeaveRequest[]   @relation("LeaveRequester")
+  decidedLeave  LeaveRequest[]   @relation("LeaveDecider")
+  leaveBalances LeaveBalance[]
+  attendance    Attendance[]
+
+  sessions      Session[]
+  notifications Notification[]           @relation("NotificationOwner")
+  actedNotifications Notification[]      @relation("NotificationActor")
+  auditLogs     AuditLog[] @relation("AuditActor")
+
+  @@index([departmentId])
+  @@index([managerId])
+}
+
+// The draft had no session table, so the httpOnly-cookie auth described in
+// backend/README.md had nowhere to live. Stateless JWTs would avoid the table
+// but cannot be revoked, so a signed-out session would stay valid until expiry.
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  // CSRF secret for double-submit protection, separate from the session token.
+  csrfSecret String
+  userAgent String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Department {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  description String?
+  // One head per department, so unique.
+  headId      String? @unique
+  createdAt   DateTime @default(now())
+
+  head    User?  @relation("DepartmentHead", fields: [headId], references: [id], onDelete: SetNull)
+  members User[] @relation("DepartmentMembers")
+}
+
+/* ------------------------------------------------------------------ */
+/* Teams and channels                                                  */
+/* ------------------------------------------------------------------ */
+
+model Team {
+  name        String?
+  description String?
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  id          String   @id @default(cuid())
+
+  members  TeamMember[]
+  channels Channel[]
+  files    File[]
+}
+
+model TeamMember {
+  id       String     @id @default(cuid())
+  role     MemberRole @default(MEMBER)
+  joinedAt DateTime   @default(now())
+  userId   String
+  teamId   String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, teamId])
+  @@index([teamId])
+}
+
+model Channel {
+  id        String      @id @default(cuid())
+  name      String
+  topic     String?
+  type      ChannelType @default(STANDARD)
+  teamId    String
+  createdBy String?
+  createdAt DateTime    @default(now())
+
+  team    Team               @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  messages Message[]
+  files    File[]
+  states   ChannelReadState[]
+
+  @@unique([teamId, name])
+  @@index([teamId])
+}
+
+// `Channel.unread` in the frontend is per-user, so it cannot live on Channel.
+// This is the table that makes the unread badge computable.
+model ChannelReadState {
+  id         String    @id @default(cuid())
+  userId     String
+  channelId  String
+  lastReadAt DateTime?
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, channelId])
+}
+
+/* ------------------------------------------------------------------ */
+/* Messaging                                                           */
+/* ------------------------------------------------------------------ */
+
+model Message {
+  id        String   @id @default(cuid())
+  body      String
+  userId    String
+  channelId String?
+  meetingId String?
+  // Threading: a reply points at its parent.
+  parentId  String?
+  createdAt DateTime @default(now())
+  // Soft delete. The draft had neither field, so database/README.md's
+  // "blanked on read" behaviour was not implementable. The body is emptied
+  // rather than the row removed, so thread position and reactions stay coherent.
+  editedAt   DateTime?
+  deletedAt  DateTime?
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel Channel? @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  meeting Meeting? @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  parent      Message?   @relation("MessageReplies", fields: [parentId], references: [id])
+  replies     Message[]  @relation("MessageReplies")
+  reactions   Reaction[]
+  attachments File[]
+
+  // Cursor pagination is `?before=<id>&limit=`, which walks this index.
+  @@index([channelId, createdAt])
+  @@index([meetingId, createdAt])
+  @@index([deletedAt])
+  @@index([userId])
+}
+
+model Reaction {
+  id        String   @id @default(cuid())
+  emoji     String
+  userId    String
+  messageId String
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, messageId, emoji])
+  @@index([messageId])
+}
+
+/* ------------------------------------------------------------------ */
+/* Files                                                               */
+/* ------------------------------------------------------------------ */
+
+model File {
+  id        String   @id @default(cuid())
+  name      String
+  mimeType  String
+  // BigInt: a file can exceed 2^31 bytes. **Throws on JSON.stringify**, so
+  // every response must convert it. See backend/src/serialise.ts.
+  sizeBytes BigInt
+  // Server-generated key, never the client-supplied name -- a path built from
+  // user input is a directory-traversal bug waiting to happen.
+  storageKey String   @unique
+
+  teamId     String?
+  channelId  String?
+  messageId  String?
+  uploadedById String
+
+  // The draft had no folderId, so the folder tree the Files page navigates
+  // could not be represented at all.
+  folderId   String?
+  // Folders are rows in this same table, joined by folderId/children. An
+  // explicit flag rather than a magic mimeType, because the flag is what every
+  // query filters on. Invariant: a folder has sizeBytes 0 and no bytes on disk.
+  isFolder   Boolean  @default(false)
+  // The draft had no deletedAt, so the documented soft delete was impossible.
+  deletedAt  DateTime?
+
+  // Per-user starring, high churn, never queried across users -- the one
+  // deliberate denormalisation in the schema.
+  starredBy User[] @relation("FileStarredBy")
+
+  createdAt DateTime @default(now())
+  uploadedBy User   @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+  team       Team?   @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  channel    Channel? @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  message    Message? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  folder     File?    @relation("FileFolder", fields: [folderId], references: [id], onDelete: SetNull)
+  children   File[]   @relation("FileFolder")
+
+  @@index([folderId])
+  @@index([teamId])
+  @@index([channelId])
+  @@index([messageId])
+  @@index([deletedAt])
+}
+
+/* ------------------------------------------------------------------ */
+/* Meetings and calendar                                               */
+/* ------------------------------------------------------------------ */
+
+model Meeting {
+  id          String   @id @default(cuid())
+  title       String
+  roomName    String   @unique
+  organizerId String
+  startsAt    DateTime
+  endsAt      DateTime
+  createdAt   DateTime @default(now())
+
+  organizer    User                 @relation("MeetingOrganizer", fields: [organizerId], references: [id])
+  participants MeetingParticipant[]
+  messages     Message[]
+  event        CalendarEvent?
+}
+
+model MeetingParticipant {
+  id        String    @id @default(cuid())
+  userId    String
+  meetingId String
+  joinedAt  DateTime?
+  leftAt    DateTime?
+  // Media state, so a reconnecting participant is restored as muted rather
+  // than broadcasting audio they thought was off.
+  muted      Boolean  @default(false)
+  cameraOff  Boolean  @default(false)
+  handRaised Boolean  @default(false)
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, meetingId])
+  @@index([meetingId])
+}
+
+model CalendarEvent {
+  id          String    @id @default(cuid())
+  title       String
+  type        EventType @default(EVENT)
+  startsAt    DateTime
+  endsAt      DateTime
+  location    String?
+  organizerId String
+  // A meeting and its calendar event stay separate rows joined here, so a
+  // meeting can be cancelled without losing the event.
+  meetingId  String?   @unique
+  createdAt  DateTime  @default(now())
+
+  organizer User              @relation("EventOrganizer", fields: [organizerId], references: [id])
+  meeting   Meeting?          @relation(fields: [meetingId], references: [id])
+  attendees CalendarAttendee[]
+
+  @@index([startsAt])
+  @@index([organizerId])
+}
+
+model CalendarAttendee {
+  id      String @id @default(cuid())
+  userId  String
+  eventId String
+  status  String @default("pending")
+
+  user  User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, eventId])
+  @@index([eventId])
+}
+
+/* ------------------------------------------------------------------ */
+/* Attendance and HR                                                   */
+/* ------------------------------------------------------------------ */
+
+model Attendance {
+  id     String   @id @default(cuid())
+  userId String
+  // A `date`, not a timestamp. An attendance day is calendar-local, and storing
+  // a timestamp here reintroduces exactly the timezone defect the prototype
+  // shipped with.
+  date           DateTime @db.Date
+  checkIn        DateTime?
+  checkOut       DateTime?
+  status         AttendanceStatus @default(PRESENT)
+  overtimeMinutes Int             @default(0)
+  note           String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Makes check-in naturally idempotent: one row per person per day, so a
+  // second press updates rather than duplicates.
+  @@unique([userId, date])
+  @@index([date])
+  @@index([status])
+}
+
+model LeaveRequest {
+  id     String @id @default(cuid())
+  userId String
+  type   LeaveType @default(ANNUAL)
+  // Full instants, NOT @db.Date. The leave form is built for a window inside a
+  // day ("09:00 to 17:00 on the 14th"), and a date column would silently
+  // truncate the time the user typed. Truncation is exactly the class of bug
+  // the attendance date column exists to avoid, in the opposite direction.
+  fromDate DateTime
+  toDate   DateTime
+  // Int, not Float. The UI computes whole days with `Math.floor(diff) + 1`, and
+  // a float invites a half-day the model has no concept of.
+  days   Int
+  reason String?
+  status LeaveStatus @default(PENDING)
+  decidedById String?
+  decidedAt   DateTime?
+  decisionNote String?
+  createdAt   DateTime  @default(now())
+
+  user      User  @relation("LeaveRequester", fields: [userId], references: [id], onDelete: Cascade)
+  decidedBy User? @relation("LeaveDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([userId, fromDate])
+}
+
+model LeaveBalance {
+  id     String   @id @default(cuid())
+  userId String
+  type   LeaveType
+  year   Int
+  entitled Int
+  used     Int      @default(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type, year])
+}
+
+model AuditLog {
+  id     String      @id @default(cuid())
+  actorId String?
+  action AuditAction
+  // Polymorphic target, so one table covers every entity type.
+  entity   String
+  entityId String
+  detail   String?
+  createdAt DateTime @default(now())
+
+  actor   User? @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([entity, entityId])
+  @@index([actorId])
+}
+
+/* ------------------------------------------------------------------ */
+/* Activity                                                            */
+/* ------------------------------------------------------------------ */
+
+// The dashboard's activity feed had no table in the draft. One table rather
+// than per-type tables, because the feed is always read the same way.
+model Notification {
+  id     String           @id @default(cuid())
+  userId String
+  kind   NotificationKind
+  actorId String?
+  targetType String
+  targetId   String
+  readAt     DateTime?
+  createdAt  DateTime       @default(now())
+
+  user  User  @relation("NotificationOwner", fields: [userId], references: [id], onDelete: Cascade)
+  actor User? @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+}

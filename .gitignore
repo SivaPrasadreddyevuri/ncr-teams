@@ -26,6 +26,14 @@ yarn-error.log*
 .env
 .env*.local
 
+# Local PostgreSQL cluster.
+#
+# The whole of pgsql/ is ignored, not just its data directory: the 17.10
+# binaries are ~97 MB of vendor files that belong in a release archive, and
+# pgsql/data is a machine-local cluster that must never be committed. Scripts
+# rebuild the cluster from ./pgsql with scripts\db-init.ps1.
+pgsql/
+
 # hosting
 .vercel
 

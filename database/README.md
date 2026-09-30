@@ -1,114 +1,132 @@
-# Database — schema plan
+# Database
 
-**Status: specified, not built.** No migrations have been written and no database
-is running. This document is the design that the migrations will follow.
+Prisma 6.19 schema, migrations and demo seed for NCR Teams.
 
-## Target
+**Status: built.** Two migrations, 19 models (20 tables — `File.starredBy` gets
+an implicit join table), 10 enums. The migrations apply cleanly to an empty
+database and CI replays them, seeds and verifies on every push.
 
-PostgreSQL 15 or newer. Chosen over SQLite or MongoDB because the domain is
-heavily relational (teams contain channels contain messages, with membership as
-a many-to-many everywhere) and because row-level security is worth having when
-the real auth lands.
+This workspace is **not deployed**. It is the schema of record; the application
+never serves it.
 
-## Entities
+## The shape follows the fixtures
 
-The mock data in `frontend/lib/data.ts` already defines the shape of most of
-these, so the fixtures and the schema can be checked against each other.
+`frontend/lib/data.ts` defines what the UI renders today, so it — not this
+README — is the contract the seed reproduces. Where the original design note and
+the fixtures disagreed, the fixtures won and the difference is recorded inline in
+`prisma/schema.prisma`. The ones worth knowing before you query this:
 
-### Identity
-
-| Table | Notes |
+| Field | Why it is not what you might expect |
 | --- | --- |
-| `users` | `id`, `email` (unique), `name`, `job_title`, `employee_code`, `role`, `department_id`, `phone`, `avatar_url`, `password_hash`, `totp_secret`, `created_at` |
-| `departments` | `id`, `name`, `description`, `head_user_id` |
-| `sessions` | `id`, `user_id`, `expires_at`, `created_at`, `user_agent` |
+| `Message.userId` | The fixture calls this `authorId`. The API maps it, so the column is named for what it is. |
+| `File.sizeBytes` | `BigInt`, because a file can exceed 2^31. **It throws on `JSON.stringify`** — see below. |
+| `Attendance.date` | A `date` column, not a timestamp. An attendance day is calendar-local. |
+| `LeaveRequest.fromDate` | A timestamp, not a `date`. The leave form captures a window *inside* a day ("09:00 to 17:00"), so truncating to a date would discard what the user typed. |
+| `Channel` | No `lastMessage`, `lastAt` or `unread` column. All three are derived — see below. |
+| `Team` | No `memberCount` or `channelCount` column. Both are counts of real rows. |
 
-`role` is an enum: `HR_ADMIN`, `MANAGER`, `EMPLOYEE` — matching the `Person`
-type today. `password_hash` and `totp_secret` are nullable so an invited user
-exists before they have set a credential.
+### `BigInt` will bite you
 
-### Teams and channels
+`File.sizeBytes` is `BigInt`. `JSON.stringify` on a raw Prisma `File` throws a
+`TypeError`, and only when a response is actually serialised, so it escapes
+typecheck. Every API response that includes a file must convert it. The seed
+asserts this deliberately: `db:verify` checks that serialising a raw row throws,
+so the trap stays visible.
 
-| Table | Notes |
-| --- | --- |
-| `teams` | `id`, `name`, `description`, `created_by`, `created_at` |
-| `team_members` | `team_id`, `user_id`, `role`, `joined_at`. PK `(team_id, user_id)` |
-| `channels` | `id`, `team_id`, `name`, `topic`, `created_by`, `created_at`. Unique `(team_id, name)` |
-| `channel_members` | `channel_id`, `user_id`, `joined_at`. PK `(channel_id, user_id)` |
+## Deliberately derived, not denormalised
 
-`team_members.role` is `OWNER`, `ADMIN`, `MEMBER`.
+- **Channel `lastMessage` / `lastAt`** — a join against the newest `Message`.
+  Persisting them would mean two more columns to keep consistent with the rows
+  they summarise, for data one query away.
+- **Channel `unread`** — a count of `Message` rows newer than the viewer's
+  `ChannelReadState.lastReadAt`. This is *why* that table exists: unread is a
+  property of a reader, so it cannot live on `Channel`.
+- **Team `memberCount` / `channelCount`** — `COUNT` over `TeamMember` and
+  `Channel`.
 
-### Messaging
+The consequence is worth stating: the fixture numbers are org-wide
+(`memberCount: 12` for a team the directory lists three people in), so the seeded
+counts are the real, smaller ones. The Teams page will show different numbers
+than the mock did. That is the fixtures being decorative, not a data problem.
 
-| Table | Notes |
-| --- | --- |
-| `messages` | `id`, `channel_id`, `author_id`, `body`, `created_at`, `edited_at`, `deleted_at` |
-| `reactions` | `message_id`, `user_id`, `emoji`. PK `(message_id, user_id, emoji)` |
-| `attachments` | `id`, `message_id`, `file_id` |
+## How this differs from the original design note
 
-Soft delete via `deleted_at` so history stays coherent; `body` is blanked on
-read rather than removed.
+Substantial enough to list, since the note is otherwise still accurate:
 
-### Files
+- **Prisma, not raw SQL.** The note specified plain numbered SQL with no ORM. Two
+  reasons to reconsider: Prisma's types catch a schema/API mismatch at compile
+  time, and `migrate deploy` in CI fails on drift. Hand-rolled migration tracking
+  was the larger risk.
+- **`cuid()` ids, not `uuid`.** Shorter, sortable, and URL-safe without encoding.
+- **`meeting_messages` folded into `Message`** with a nullable `meetingId`, and
+  `attachments` as an implicit many-to-many to `File`. Chat in a meeting and chat
+  in a channel are the same shape; separate tables would duplicate reactions,
+  threading and attachments.
+- **`channel_members` was not built.** Every fixture channel's membership is
+  exactly its team's membership, so a second table would be redundant today. It
+  is needed before `ChannelType.PRIVATE` can mean anything — until then the API
+  derives channel members from the team.
+- **`leave_requests.from` / `to` are named `fromDate` / `toDate`** because `from`
+  is a reserved SQL word and would need quoting everywhere.
+- **`twoFactorEnabled` gained its `twoFactorSecret`.** The note had the boolean
+  without the secret, which makes `/verify-2fa` impossible to implement.
+- **`Session.tokenHash` stores a hash, not the token**, and gained `csrfSecret`
+  and `revokedAt`. Without revocation a signed-out session stays valid until it
+  expires.
+- **Added `ChannelReadState`, `Notification` and `AuditLog`** — the activity feed
+  and the unread badge had no table in the note.
+- **`Attendance` uses a surrogate key plus `@@unique([userId, date])`** rather
+  than a composite primary key, because Prisma requires a single-field `@id`.
+  The uniqueness that makes check-in idempotent is unchanged.
 
-| Table | Notes |
-| --- | --- |
-| `files` | `id`, `name`, `size_bytes`, `mime_type`, `storage_key`, `team_id`, `folder_id`, `uploaded_by`, `starred_by` (array), `created_at`, `deleted_at` |
+## Local cluster
 
-`storage_key` points at object storage, not the database. Byte size lives here
-so quota checks avoid a round trip. `starred_by` is the one deliberate
-denormalisation: starring is per-user, high-churn and never queried across users.
+The repository carries a PostgreSQL 17.10 cluster under `pgsql/`, on **port
+5433** — deliberately not 5432, so it never collides with another PostgreSQL on
+the same machine. The whole directory is gitignored: the binaries are vendor
+files, and `pgsql/data` is machine-local state.
 
-### Meetings and calendar
+The bundled build contains only `initdb`, `pg_ctl` and `postgres`. There is no
+`psql` or `createdb`, which is why `db:bootstrap` issues the administrative SQL
+through the `pg` driver instead.
 
-| Table | Notes |
-| --- | --- |
-| `meetings` | `id`, `title`, `room_name`, `organizer_id`, `starts_at`, `ends_at`, `created_at` |
-| `meeting_participants` | `meeting_id`, `user_id`, `joined_at`, `left_at`. PK `(meeting_id, user_id)` |
-| `meeting_messages` | `id`, `meeting_id`, `author_id`, `body`, `created_at` |
-| `calendar_events` | `id`, `title`, `organizer_id`, `starts_at`, `ends_at`, `type`, `location`, `meeting_id` (nullable), `created_at` |
+```powershell
+.\scripts\db-init.ps1     # initdb, start, create the role and database
+.\scripts\db-start.ps1    # start (no-op if already up)
+.\scripts\db-stop.ps1     # stop, matched on this project's binary path
+.\scripts\db-reset.ps1    # drop, replay migrations, seed, verify
+```
 
-A meeting and its calendar event are kept as separate rows joined by
-`meeting_id`, because a meeting can be cancelled without losing the event.
-`type` is `MEETING` or `EVENT`.
+## Commands
 
-### Attendance and HR
+```bash
+npm run db:bootstrap   # create the application role and database
+npm run db:validate    # parse the schema
+npm run db:generate    # regenerate the client
+npm run db:migrate -- --name <name>
+npm run db:deploy      # apply migrations, no prompts — use in CI
+npm run db:reset       # drop, replay, seed
+npm run db:seed        # load the demo fixtures
+npm run db:verify      # assert the seeded values, not just the row counts
+npm run db:studio      # browse the data
+```
 
-| Table | Notes |
-| --- | --- |
-| `attendance_records` | `user_id`, `date`, `check_in`, `check_out`, `status`, `overtime_minutes`. PK `(user_id, date)` |
-| `leave_requests` | `id`, `user_id`, `type`, `from`, `to`, `days`, `reason`, `status`, `decided_by`, `decided_at`, `created_at` |
+`db:seed` **truncates**. It refuses to run against a populated database unless
+`SEED_ALLOW_WIPE=true` is set, so it cannot quietly discard real data.
 
-`date` is a `date`, never a timestamp — an attendance day is calendar-local, and
-storing a timestamp reintroduces the timezone bug the prototype had. `status` is
-`PRESENT`, `LATE`, `REMOTE`, `HALF_DAY`, `ABSENT`. The composite primary key is
-what makes check-in naturally idempotent.
+`db:verify` is the one that matters. It checks *values* — that a 10:00 standup is
+still 10:00 in `Asia/Kolkata`, that leave kept its time of day, that no person
+has two attendance rows on one day, that `c1` reports two unread. A row count
+cannot catch a timestamp stored in the right column but resolved against the
+wrong timezone, which is the failure mode this schema is most exposed to.
 
-### Activity
+## Timezones
 
-| Table | Notes |
-| --- | --- |
-| `notifications` | `id`, `user_id`, `kind`, `actor_id`, `target_type`, `target_id`, `read_at`, `created_at` |
+`Asia/Kolkata` is pinned in `frontend/lib/format.ts` and mirrored in
+`lib/app-time.ts`. Authored wall-clock times are resolved against that zone, never
+the host's, so the demo reads the same on a UTC CI runner as on a machine set to
+the office's timezone.
 
-`kind` is `message`, `file`, `meeting`, `leave`, `mention`. One table rather than
-per-type tables, because the feed is always read the same way.
-
-## Conventions
-
-- Primary keys are `uuid` with `gen_random_uuid()`.
-- Every table has `created_at timestamptz not null default now()`.
-- Timestamps are `timestamptz` and stored in UTC; formatting is the frontend's
-  job.
-- Foreign keys are declared, with `on delete cascade` for owned rows (reactions,
-  attachments) and `on delete set null` for referenced ones (organiser).
-- Indexes on every foreign key, plus a composite `(channel_id, created_at desc)`
-  on `messages` for the cursor-paginated feed.
-- Migrations are plain numbered SQL applied in order, tracked in a
-  `schema_migrations` table. No ORM.
-
-## Seed plan
-
-`seed.sql` reproduces exactly what `frontend/lib/data.ts` mocks today, so the
-demo looks identical once it reads from Postgres: 8 users, 6 departments, 8
-teams, 10 channels, 11 messages, 8 calendar events, 5 meetings, 9 files, 40
-attendance records and 3 leave requests.
+The two are copies rather than a shared package: `format.ts` is bundled for the
+browser and this workspace must not depend on the frontend's build output. If the
+zone ever changes, change it in both.

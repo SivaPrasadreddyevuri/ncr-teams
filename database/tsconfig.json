@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+
+    /* This workspace runs through tsx, never tsc, so there is no build step and
+       nothing is emitted. `noEmit` makes that explicit and stops a stray `tsc`
+       from writing .js files next to the sources. */
+    "noEmit": true,
+
+    /* Type-check the sources but skip declaration output entirely. */
+    "skipLibCheck": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "forceConsistentCasingInFileNames": true,
+
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "types": ["node"]
+  },
+  "include": ["prisma/**/*.ts", "scripts/**/*.ts", "lib/**/*.ts"]
+}
