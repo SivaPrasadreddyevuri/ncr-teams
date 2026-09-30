@@ -43,37 +43,44 @@ prevent a double-tap creating two identical rows — and are grouped into
 
 ## Files
 
-Bytes live on local disk under `backend/var/uploads`; `File.storageKey` is a
-server-generated key. Three properties are load-bearing:
+Bytes live in the `File.content` column (`bytea`). A row and its content are
+written in one statement and cleared together on delete, so the two can never be
+separated. Three properties are load-bearing:
 
-- **A key never becomes a path unchecked.** `resolveKey` resolves it and then
-  confirms the result is still inside the root, so `../`, an absolute path, a
-  null byte, and the sibling-directory case (`uploads-evil` beside `uploads`, which
-  a plain `startsWith` would accept) are all rejected.
-- **The filename never reaches the key.** Only the name is honoured, and only as
-  a short alphanumeric extension. A double extension is truncated to the last
-  one. The original name is stored as a label and sanitised before going into
-  `Content-Disposition`.
-- **Uploads stream, and the cap is busboy's.** A multipart body is piped straight
-  to disk and counted in flight. busboy owns the limit because it truncates the
-  part and keeps parsing, so the 413 is actually delivered — an earlier version
-  let the byte counter destroy the stream first, which killed the parser, so
-  `close` never fired and the request hung until the client gave up.
+- **The filename never becomes a path.** There are no paths. `File.storageKey` is
+  a server-generated identity, not a location, and nothing turns it into one. The
+  user-chosen name is stored as a label and sanitised before going into
+  `Content-Disposition` — quotes, backslashes and newlines are replaced and the
+  value is truncated, so a name cannot inject response headers.
+- **The cap is enforced in flight.** The byte counter stops collecting the moment
+  it passes `MAX_UPLOAD_BYTES` (5 MB by default) and destroys the part, rather
+  than collecting the whole body and checking afterwards — that would let a caller
+  send an unbounded body. This replaced a busboy-owned limit, which truncated the
+  part silently and left a row holding half a file.
+- **Uploads are a small buffer, not a stream.** The old rule was "never buffer,
+  write to disk". That was about a 50 MB body on a small instance; at 5 MB the
+  bytes cross a function call rather than a filesystem, so the streaming layer,
+  the containment checks and the partial-file cleanup are all gone.
 
-**Missing bytes are a 410, not a 404.** A row can outlive its content here (see
-below), and "gone" is a different situation from "never existed"; the client can
-say something useful about each. `FileDto.uploaded` reports the same thing in a
-listing, so a row with no content does not render as a working download button.
+**Content-less rows are a 410, not a 404.** A seeded row whose content
+`npm run demo:files` has not attached is known to exist and has nothing to serve,
+which is a different situation from never having had an id. `FileDto.uploaded`
+reports the same thing in a listing, so such a row does not render as a working
+download button.
 
-### Ephemeral by design
+### Why the bytes moved into the database
 
-Render's free tier wipes the filesystem on every deploy and instance restart.
-Database rows survive, so a row whose bytes are gone is a normal state here, not
-an edge case. Uploads therefore do not persist across a deploy.
+They were on local disk, under `backend/var/uploads`. Render's free tier wipes
+that filesystem on every deploy and instance restart while the rows survive, so
+"metadata without content" was a routine state that needed the 410 branch above
+to explain. Moving the bytes into the row removes the failure mode rather than
+documenting it, and it removes the reason for the streaming and path-handling
+machinery.
 
-That is a deliberate simplification for a showcase. Cloudflare R2 is the fix if
-this ever needs to outlive a deploy, and the account is already needed for TURN;
-it was skipped because it buys nothing a viewer of the demo would notice.
+The cap is what makes this affordable: 5 MB per file keeps a demo's worth of
+uploads far inside a hosted Postgres free tier, and `bytea` is only appropriate
+while that stays true. The moment genuine multi-megabyte uploads matter, the
+content belongs in object storage and `File` keeps a key again.
 
 ## Realtime
 
@@ -273,11 +280,12 @@ hiding it buys nothing. Do not reuse the value for anything real;
 Set `NEXT_PUBLIC_DEMO_EMAIL` / `NEXT_PUBLIC_DEMO_PASSWORD` in the frontend so the
 login page shows the credentials.
 
-`demo:files` writes a genuinely valid minimal PDF, a real PNG and JPEG, and real
-Markdown, keyed to the seeded `storageKey`s. `.fig` and `.pptx` get a short text
-stub instead: a valid download that opens in a text editor, which is honest and
-still not a broken button. The PDF is assembled with real cross-reference byte
-offsets, so it is a valid PDF and not merely a plausible one.
+`demo:files` attaches a genuinely valid minimal PDF, a real PNG and JPEG, and real
+Markdown to the seeded rows, writing the content and correcting `sizeBytes` to
+match. `.fig` and `.pptx` get a short text stub instead: a valid download that
+opens in a text editor, which is honest and still not a broken button. The PDF is
+assembled with real cross-reference byte offsets, so it is a valid PDF and not
+merely a plausible one.
 
 ## Smoke test
 

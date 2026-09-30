@@ -34,14 +34,6 @@ yarn-error.log*
 # rebuild the cluster from ./pgsql with scripts\db-init.ps1.
 pgsql/
 
-# Uploaded file bytes.
-#
-# The database holds the metadata and this holds the bytes, and the bytes are
-# reproducible: backend/scripts/materialise-demo-files.ts recreates the seeded
-# files. Committing a var/ directory would mean a repository that grows with
-# every upload someone makes.
-backend/var/
-
 # hosting
 .vercel
 

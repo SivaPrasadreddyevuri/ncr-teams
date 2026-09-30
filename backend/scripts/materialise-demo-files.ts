@@ -1,29 +1,25 @@
 /**
- * Writes real bytes behind the seeded file rows.
+ * Writes real bytes into the seeded File rows.
  *
- * The seed creates nine `File` rows with metadata but no content, which is
+ * The seed creates nine `File` rows with metadata but no `content`, which is
  * correct for a seed -- it describes rows, not objects. But it means clicking
- * "download" in the demo returns a 410, and a showcase full of broken download
+ * "download" in the demo returns 410, and a showcase full of broken download
  * buttons defeats the point of having them.
  *
- * So this writes a small, genuinely valid file for each seeded row, keyed to
- * match `File.storageKey`. The two extensions that would mean hand-authoring a
- * ZIP container (`.fig`, `.pptx`) get a short plain-text stub instead: a valid
- * download that opens in a text editor, which is honest and still not a broken
- * button.
+ * So this attaches a small, genuinely valid file to each seeded row. The two
+ * extensions that would mean hand-authoring a ZIP container (`.fig`, `.pptx`)
+ * get a short plain-text stub instead: a valid download that opens in a text
+ * editor, which is honest and still not a broken button.
  *
- * Bytes are reproducible, so `var/` stays gitignored. Re-run after a re-seed or a
- * redeploy -- which on the free tier is every deploy, since the filesystem is
- * ephemeral.
+ * Bytes are reproducible, so nothing about this needs to be committed. Re-run
+ * after a re-seed.
  *
  * Usage:
  *   npm run demo:files --workspace backend
  */
 
 import '../src/load-env.js';
-import { Readable } from 'node:stream';
 import { prisma } from '../src/db.js';
-import * as storage from '../src/storage.js';
 
 /**
  * A minimal but genuinely valid PDF.
@@ -33,7 +29,7 @@ import * as storage from '../src/storage.js';
  * five hundred bytes. The byte offsets in the xref table are real, which is why
  * the offsets are computed rather than typed.
  */
-function minimalPdf(title: string, lines: string[]): Buffer {
+function minimalPdf(title: string, lines: string[]): Uint8Array<ArrayBuffer> {
   const escape = (value: string) => value.replace(/([\\()])/g, '\\$1');
 
   const content = [
@@ -89,7 +85,7 @@ function minimalPdf(title: string, lines: string[]): Buffer {
 }
 
 /** A 1x1 PNG. Real, decodable, and small enough to inline as bytes. */
-function minimalPng(): Buffer {
+function minimalPng(): Uint8Array<ArrayBuffer> {
   return Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
     'base64',
@@ -97,7 +93,7 @@ function minimalPng(): Buffer {
 }
 
 /** A tiny but valid JPEG: SOI, APP0/JFIF, a 1x1 luminance block, EOI. */
-function minimalJpeg(): Buffer {
+function minimalJpeg(): Uint8Array<ArrayBuffer> {
   return Buffer.from(
     '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0a' +
       'HBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAA' +
@@ -136,8 +132,18 @@ Everything else in the app is genuine.
 `;
 }
 
+/**
+ * UTF-8 bytes for a string.
+ *
+ * `TextEncoder` rather than `Buffer.from`, because Prisma types a `Bytes` column
+ * as `Uint8Array<ArrayBuffer>` and Node's `Buffer` is declared over the wider
+ * `ArrayBufferLike` -- so a `Buffer` is not assignable without a copy. The
+ * encoder allocates exactly the array Prisma asked for.
+ */
+const utf8 = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text);
+
 /** Which generator to use for a given row. */
-function contentFor(name: string, mimeType: string): Buffer {
+function contentFor(name: string, mimeType: string): Uint8Array<ArrayBuffer> {
   if (mimeType === 'application/pdf') {
     return minimalPdf(name.replace(/\.pdf$/i, ''), [
       'Quarterly roadmap summary.',
@@ -148,16 +154,16 @@ function contentFor(name: string, mimeType: string): Buffer {
   }
   if (mimeType === 'image/jpeg') return minimalJpeg();
   if (mimeType === 'image/png') return minimalPng();
-  if (mimeType === 'text/markdown') return Buffer.from(markdown(name), 'utf8');
+  if (mimeType === 'text/markdown') return utf8(markdown(name));
 
   const extension = name.split('.').pop()?.toLowerCase();
-  if (extension === 'fig') return Buffer.from(textStub(name, 'Figma'), 'utf8');
-  return Buffer.from(textStub(name, 'slides'), 'utf8');
+  if (extension === 'fig') return utf8(textStub(name, 'Figma'));
+  return utf8(textStub(name, 'slides'));
 }
 
 async function main() {
   const rows = await prisma.file.findMany({
-    select: { id: true, name: true, mimeType: true, storageKey: true, isFolder: true },
+    select: { id: true, name: true, mimeType: true, sizeBytes: true, isFolder: true },
   });
 
   if (rows.length === 0) {
@@ -174,18 +180,23 @@ async function main() {
       continue;
     }
 
-    const bytes = contentFor(row.name, row.mimeType);
-    // Overwriting is intended here: these files are regenerated on every deploy
-    // because the free-tier filesystem does not survive one. The keys are the
-    // seeded ones, not anything a client chose.
-    await storage.putStream(row.storageKey, Readable.from([bytes]), { overwrite: true });
+    const content = contentFor(row.name, row.mimeType);
+
+    // `sizeBytes` is written alongside the content rather than left as the
+    // metadata-only value, so a row whose content is attached is self-consistent
+    // with no second pass to reconcile the two.
+    await prisma.file.update({
+      where: { id: row.id },
+      data: { content, sizeBytes: BigInt(content.length) },
+    });
+
     written += 1;
-    console.log(`  ${row.name.padEnd(24)} ${String(bytes.length).padStart(7)} bytes  ${row.mimeType}`);
+    console.log(`  ${row.name.padEnd(24)} ${String(content.length).padStart(7)} bytes  ${row.mimeType}`);
   }
 
   console.log(
-    `\nWrote ${written} file${written === 1 ? '' : 's'} to ${storage.storageRoot}` +
-      (skipped > 0 ? ` (${skipped} folders have no bytes of their own).` : '.'),
+    `\nAttached content to ${written} file${written === 1 ? '' : 's'}` +
+      (skipped > 0 ? ` (${skipped} folders have no content of their own).` : '.'),
   );
 }
 

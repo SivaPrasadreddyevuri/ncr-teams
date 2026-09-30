@@ -61,24 +61,20 @@ const schema = z
     CORS_ORIGINS: z.string().default('http://localhost:3000'),
 
     /**
-     * Where uploaded bytes live.
-     *
-     * Relative paths resolve against the process working directory, so this is
-     * only predictable if the service is started from `backend/` -- which both
-     * the npm script and Render's `startCommand` do. Overridable so a deployment
-     * can point at a mounted volume instead.
-     */
-    STORAGE_DIR: z.string().default('var/uploads'),
-
-    /**
      * Largest accepted upload.
      *
-     * Enforced while streaming, not after, so an oversized body is abandoned
-     * part-way rather than being received in full first. 50 MB is generous for a
-     * workspace attachment and small enough that a free-tier instance will not be
-     * killed by one request.
+     * 5 MB, and the reason it is a cap rather than a design constraint is
+     * `bytea`: the content lives in the File row, so an upload is bounded by what
+     * a single row can hold and by the instance's memory. Buffering to the cap
+     * and storing is therefore safe here -- the "never buffer a 50 MB body" rule
+     * that applied to an on-disk writer was about a limit this cap never
+     * approaches.
+     *
+     * The hosted free tier also has a storage allowance shared with everything
+     * else, so the cap is the per-file bound and the tier's total is the real one.
+     * Large Objects (`pg_largeobject`) are the step up if that needs raising.
      */
-    MAX_UPLOAD_BYTES: z.coerce.number().int().min(1024).default(50 * 1024 * 1024),
+    MAX_UPLOAD_BYTES: z.coerce.number().int().min(1024).default(5 * 1024 * 1024),
 
     /**
      * Number of reverse proxies in front of this service. Render terminates TLS

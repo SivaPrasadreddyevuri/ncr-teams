@@ -1,17 +1,27 @@
 /**
  * Files.
  *
- * Uploads are streamed from the request body straight to disk by busboy, never
- * buffered, and the size cap is enforced while the bytes are in flight. See
- * src/storage.ts for why that matters on a small instance.
+ * Content lives in the `File.content` column, so a row and its bytes live and
+ * die together. The earlier arrangement -- metadata in Postgres, bytes on local
+ * disk -- could produce a row with no object behind it, because a free-tier
+ * filesystem is wiped on every deploy. That state was reachable often enough to
+ * need a 410 branch to explain it, and it no longer exists.
  *
- * Bytes are addressed by `File.storageKey`, which is server-generated. A
- * client-supplied name is stored as `File.name` and used only as a label and a
- * `Content-Disposition` value -- never as a path.
+ * ## Two things that got simpler
+ *
+ * **No path handling.** `File.storageKey` is still there, but it is an identity,
+ * not a location, so nothing turns it into a filesystem path. The containment
+ * checks, the exclusive-create flag and the partial-file cleanup all belonged to
+ * a boundary that no longer exists.
+ *
+ * **Buffering is fine.** The cap is 5 MB, and the earlier "never buffer" rule was
+ * about a 50 MB body on a small instance. Streaming mattered because the bytes
+ * crossed a filesystem; now they cross a function call.
  */
 
 import { Router } from 'express';
 import Busboy from 'busboy';
+import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import { badRequest, HttpError, notFound } from '../http/errors.js';
@@ -19,17 +29,8 @@ import { sendJson } from '../serialise.js';
 import { requireAuth } from '../middleware/session.js';
 import { publish } from '../realtime/bus.js';
 import { toFileDto } from '../dto.js';
-import * as storage from '../storage.js';
 import { config } from '../config.js';
 
-/**
- * The select shared by every file response.
- *
- * `storageKey` is selected because two routes need it to check whether bytes
- * still exist, and it is a server-generated key rather than a path, so reading it
- * is harmless. It is never returned: responses are built through `toFileDto`,
- * which names its fields explicitly instead of spreading the row.
- */
 const fileSelect = {
   id: true,
   name: true,
@@ -38,24 +39,28 @@ const fileSelect = {
   isFolder: true,
   createdAt: true,
   deletedAt: true,
-  storageKey: true,
+  content: true,
   team: { select: { name: true } },
   starredBy: { select: { id: true } },
 } as const;
 
-/**
- * `Content-Disposition` for a download.
- *
- * The filename is quoted and stripped of anything that could break out of the
- * header, because this value is built from a name a user chose. Without the
- * sanitising, a name containing a quote or a newline would let someone inject
- * response headers.
- */
+/** The most a client is told in a `Content-Disposition` header. */
+const MAX_NAME_IN_HEADER = 200;
+
 function contentDisposition(name: string): string {
-  const safe = name.replace(/[\r\n"\\]/g, '_');
-  // The ASCII fallback form, plus a UTF-8 form so a name with accents still
-  // arrives intact in a modern browser.
-  return `attachment; filename="${safe}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+  // A user-chosen name goes into a header, so quotes, backslashes and newlines
+  // are replaced. Without this, a name containing a quote or a CRLF would let
+  // someone inject response headers. Also truncated: a long name is not worth the
+  // header risk, and a browser copes with a shortened one.
+  const safe = name.replace(/[\r\n"\\]/g, '_').slice(0, MAX_NAME_IN_HEADER);
+  return `attachment; filename="${safe}"; filename*=UTF-8''${encodeURIComponent(
+    name.slice(0, MAX_NAME_IN_HEADER),
+  )}`;
+}
+
+/** Whether a row carries bytes. Folders never do -- a folder's content is its children. */
+function hasContent(row: { content: Uint8Array | null; isFolder: boolean }): boolean {
+  return !row.isFolder && row.content !== null;
 }
 
 export function filesRouter() {
@@ -83,23 +88,16 @@ export function filesRouter() {
       orderBy: { createdAt: 'desc' },
     });
 
-    // Existence is checked per row so a row whose bytes were lost on a redeploy
-    // reports `uploaded: false` instead of presenting a download that 404s.
-    const dtos = await Promise.all(
-      rows.map(async (row) => {
-        const uploaded = row.isFolder ? false : await storage.exists(row.storageKey);
-        return toFileDto(row, uploaded, req.user!.id);
-      }),
-    );
-
-    sendJson(res, 200, { files: dtos });
+    sendJson(res, 200, {
+      files: rows.map((row) => toFileDto(row, hasContent(row), req.user!.id)),
+    });
   });
 
   /**
    * Multipart upload.
    *
-   * Expects exactly one `file` part. `channelId` and `folderId` are optional
-   * fields that place the file alongside a message or in a folder.
+   * The bytes are written in the same statement that creates the row, so there is
+   * no window where a row exists without its content, or content without a row.
    */
   router.post('/', (req, res, next) => {
     const contentType = req.get('content-type');
@@ -110,117 +108,89 @@ export function filesRouter() {
 
     let bus: Busboy.Busboy;
     try {
-      bus = Busboy({
-        headers: req.headers,
-        // busboy owns the size cap, not `putStream`. It truncates the part and
-        // keeps parsing, so the `close` event still arrives and the 413 can
-        // actually be written.
-        //
-        // Letting `putStream` trip first was a real hang: its counter destroys
-        // the read stream, which breaks the parser, so `close` never fired and
-        // the request sat until the client timed out. The limit below is set one
-        // byte lower than the counter's, making busboy the authority and leaving
-        // the counter as a backstop that should never be reached.
-        limits: { files: 1, fileSize: config.MAX_UPLOAD_BYTES, fields: 10 },
-      });
+      bus = Busboy({ headers: req.headers, limits: { files: 1, fields: 10 } });
     } catch {
       next(badRequest('bad_multipart', 'The upload could not be read.'));
       return;
     }
 
-    // Set before the event handlers, since a failure can arrive in the same tick.
+    // Set before the handlers run: a failure can arrive in the same tick.
     let settled = false;
     const fail = (status: number, code: string, message: string) => {
       if (settled) return;
       settled = true;
-      res.status(status).type('application/json').send(
-        JSON.stringify({ error: { code, message } }),
-      );
+      res.status(status).type('application/json').send(JSON.stringify({ error: { code, message } }));
     };
 
-    let storageKey: string | null = null;
+    const chunks: Buffer[] = [];
+    const fields: Array<[string, string]> = [];
+    let bytes = 0;
     let originalName = '';
     let declaredMime = 'application/octet-stream';
-    let folderId: string | undefined;
-    let channelId: string | undefined;
-    let upload: Promise<{ bytes: number }> | null = null;
-    // busboy has no `fileSizeLimit` event. When a part exceeds `limits.fileSize`
-    // it truncates the stream and sets this flag, so truncation is detected
-    // here rather than by an event that never fires.
-    let fileStream: (NodeJS.ReadableStream & { truncated?: boolean }) | null = null;
+    let tooLarge = false;
 
     bus.on('field', (name, value) => {
-      if (name === 'folderId') folderId = value;
-      if (name === 'channelId') channelId = value;
+      fields.push([name, value]);
     });
 
     bus.on('file', (_field, stream, info) => {
-      fileStream = stream;
       originalName = info.filename || 'untitled';
       // A client-supplied Content-Type is a hint, not a fact. It is recorded but
       // never used to decide how to handle the bytes.
       declaredMime = info.mimeType || 'application/octet-stream';
-      storageKey = storage.newStorageKey(originalName);
-      upload = storage.putStream(storageKey, stream, {
-        maxBytes: config.MAX_UPLOAD_BYTES + 1,
+
+      stream.on('data', (chunk: Buffer) => {
+        bytes += chunk.length;
+        if (bytes > config.MAX_UPLOAD_BYTES) {
+          // Stop immediately. Collecting it all and checking afterwards would let
+          // a caller send an unbounded body.
+          tooLarge = true;
+          chunks.length = 0;
+          stream.destroy();
+        } else {
+          chunks.push(chunk);
+        }
       });
     });
 
-    bus.on('filesLimit', () => {
-      fail(400, 'too_many_files', 'Upload one file at a time.');
-    });
+    bus.on('filesLimit', () => fail(400, 'too_many_files', 'Upload one file at a time.'));
+    bus.on('error', () => fail(400, 'bad_multipart', 'The upload could not be read.'));
 
-    // A client that disconnects mid-upload. Without this the write would fail
-    // into a request that is already gone.
+    // A client that disconnects mid-upload. Without this the handler would try to
+    // write a response to a request that is already gone.
     req.on('aborted', () => {
       settled = true;
-    });
-
-    bus.on('error', () => {
-      fail(400, 'bad_multipart', 'The upload could not be read.');
     });
 
     bus.on('close', () => {
       void (async () => {
         try {
-          // The client disconnected, or an earlier failure already answered.
           if (settled) return;
 
-          if (fileStream?.truncated) {
-            // busboy stopped at the cap and the rest of the body was read and
-            // discarded, so the connection is still healthy and this 413 is
-            // actually delivered. Clean up the truncated file first: a row
-            // pointing at a partial upload is worse than no file.
-            if (storageKey) await storage.deleteKey(storageKey);
-            fail(413, 'file_too_large', `Uploads are limited to ${Math.floor(config.MAX_UPLOAD_BYTES / 1024 / 1024)} MB.`);
+          if (tooLarge) {
+            fail(
+              413,
+              'file_too_large',
+              `Uploads are limited to ${Math.floor(config.MAX_UPLOAD_BYTES / 1024 / 1024)} MB.`,
+            );
             return;
           }
-
-          if (!upload || !storageKey) {
+          if (originalName === '') {
             fail(400, 'no_file', 'Include a file in the upload.');
             return;
           }
-
-          let written: { bytes: number };
-          try {
-            written = await upload;
-          } catch (error) {
-            if (error instanceof storage.StorageError && error.code === 'too_large') {
-              await storage.deleteKey(storageKey);
-              fail(413, 'file_too_large', error.message);
-              return;
-            }
-            fail(400, 'upload_failed', 'The upload could not be saved.');
+          if (bytes === 0) {
+            // A folder's own bytes are its children, so a zero-length file is
+            // almost always a mistake rather than an empty document.
+            fail(400, 'empty_file', 'That file was empty.');
             return;
           }
 
-          // A folder's own bytes are its children, so it has none. Refusing a
-          // zero-length file keeps an accidental empty upload from looking like a
-          // successful one.
-          if (written.bytes === 0) {
-            await storage.deleteKey(storageKey);
-            fail(400, 'empty_file', 'That file was empty.');
-            return;
+          let folderId: string | undefined;
+          let channelId: string | undefined;
+          for (const [name, value] of fields) {
+            if (name === 'folderId') folderId = value;
+            if (name === 'channelId') channelId = value;
           }
 
           if (folderId) {
@@ -229,7 +199,6 @@ export function filesRouter() {
               select: { id: true, isFolder: true, deletedAt: true },
             });
             if (!parent || !parent.isFolder || parent.deletedAt) {
-              await storage.deleteKey(storageKey);
               fail(400, 'bad_folder', 'That folder does not exist.');
               return;
             }
@@ -241,7 +210,6 @@ export function filesRouter() {
               select: { id: true },
             });
             if (!channel) {
-              await storage.deleteKey(storageKey);
               fail(400, 'bad_channel', 'That channel does not exist.');
               return;
             }
@@ -251,8 +219,11 @@ export function filesRouter() {
             data: {
               name: originalName,
               mimeType: declaredMime,
-              sizeBytes: BigInt(written.bytes),
-              storageKey,
+              sizeBytes: BigInt(bytes),
+              // Server-generated identity. The name is stored in `name` and used
+              // only as a label -- it never becomes a path.
+              storageKey: `uploads/${new Date().toISOString().slice(0, 10)}/${randomBytes(16).toString('hex')}`,
+              content: Buffer.concat(chunks),
               uploadedById: req.user!.id,
               folderId: folderId ?? null,
               channelId: channelId ?? null,
@@ -270,44 +241,45 @@ export function filesRouter() {
       })();
     });
 
-    // Pipe the request body into the parser. Any error before `close` arrives
-    // here, and it must reach the error middleware rather than being swallowed.
+    // Any error before `close` arrives here, and it must reach the error
+    // middleware rather than being swallowed.
     req.pipe(bus);
   });
 
   /**
    * Downloads the bytes.
    *
-   * A row with no bytes is a 410, not a 404: the file is known to exist and is
-   * gone, which is a different situation from never having had one. A client can
-   * tell "lost in a redeploy" from "bad id" and say something useful.
+   * A 410 rather than a 404 for a row with no content: the file is known to
+   * exist and is gone, which is a different situation from never having had an
+   * id. With the bytes in the database this is now rare -- a seeded row whose
+   * content `demo:files` has not attached, or a soft-deleted file -- and a client
+   * can say something useful about each.
    */
-  router.get('/:id/download', async (req, res, next) => {
+  router.get('/:id/download', async (req, res) => {
     const { id } = z.object({ id: z.string().min(1).max(64) }).parse(req.params);
 
     const row = await prisma.file.findUnique({
       where: { id },
-      select: { id: true, name: true, mimeType: true, isFolder: true, storageKey: true, sizeBytes: true },
+      select: { id: true, name: true, mimeType: true, isFolder: true, content: true, sizeBytes: true },
     });
     if (!row || row.isFolder) throw notFound('No such file.');
 
-    if (!(await storage.exists(row.storageKey))) {
+    if (row.content === null) {
       throw new HttpError(
         410,
         'content_missing',
-        'This file has no stored content. Uploads do not survive a redeploy on the free tier.',
+        'This file has no stored content. Run `npm run demo:files` to attach it to the seeded rows.',
       );
     }
 
     res.setHeader('content-type', row.mimeType);
     res.setHeader('content-length', row.sizeBytes.toString());
     res.setHeader('content-disposition', contentDisposition(row.name));
+    // A file from the database is a user-supplied document, so the browser is
+    // told not to guess a type and execute it.
+    res.setHeader('x-content-type-options', 'nosniff');
 
-    // A streamed body means a large download does not have to fit in memory to be
-    // forwarded, and the client sees bytes start arriving immediately.
-    const stream = storage.createReadStreamFor(row.storageKey);
-    stream.on('error', (error) => next(error));
-    stream.pipe(res);
+    res.end(Buffer.from(row.content));
   });
 
   /** Toggles the caller's star. Per-user, so it is a relation, not a column. */
@@ -320,36 +292,34 @@ export function filesRouter() {
     });
     if (!row) throw notFound('No such file.');
 
-    if (row.starredBy.length > 0) {
-      await prisma.file.update({
-        where: { id },
-        data: { starredBy: { disconnect: [{ id: req.user!.id }] } },
-      });
-    } else {
-      await prisma.file.update({
-        where: { id },
-        data: { starredBy: { connect: [{ id: req.user!.id }] } },
-      });
-    }
+    await prisma.file.update({
+      where: { id },
+      data: {
+        starredBy:
+          row.starredBy.length > 0
+            ? { disconnect: [{ id: req.user!.id }] }
+            : { connect: [{ id: req.user!.id }] },
+      },
+    });
 
     const fresh = await prisma.file.findUniqueOrThrow({ where: { id }, select: fileSelect });
-    sendJson(res, 200, {
-      file: toFileDto(fresh, await storage.exists(fresh.storageKey), req.user!.id),
-    });
+    sendJson(res, 200, { file: toFileDto(fresh, hasContent(fresh), req.user!.id) });
   });
 
   /**
    * Soft delete, uploader only.
    *
-   * The bytes go too: a soft delete that leaves the object means a "deleted" file
-   * is still one presigned URL away, which is not a delete.
+   * The content is cleared as well as marking the row. A soft delete that leaves
+   * the bytes means a "deleted" file is still one download away, which is not a
+   * delete -- and with the bytes in the row, leaving them would also mean the
+   * deleted row still occupies the space the delete was meant to reclaim.
    */
   router.delete('/:id', async (req, res) => {
     const { id } = z.object({ id: z.string().min(1).max(64) }).parse(req.params);
 
     const row = await prisma.file.findUnique({
       where: { id },
-      select: { id: true, uploadedById: true, isFolder: true, storageKey: true },
+      select: { id: true, uploadedById: true, isFolder: true },
     });
     if (!row) throw notFound('No such file.');
     if (row.uploadedById !== req.user!.id) {
@@ -364,8 +334,7 @@ export function filesRouter() {
       }
     }
 
-    await prisma.file.update({ where: { id }, data: { deletedAt: new Date() } });
-    if (!row.isFolder) await storage.deleteKey(row.storageKey);
+    await prisma.file.update({ where: { id }, data: { deletedAt: new Date(), content: null } });
 
     sendJson(res, 200, { deleted: true, id });
   });

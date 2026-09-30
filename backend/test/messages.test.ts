@@ -13,7 +13,6 @@ import assert from 'node:assert/strict';
 import { readJson, signedInClient, startHarness, type Client, type Harness } from './helpers.js';
 import { EMPLOYEE, HR_ADMIN, TEST_PASSWORD, ensureTestPasswords } from './fixtures.js';
 import { prisma } from '../src/db.js';
-import * as storage from '../src/storage.js';
 import { subscribe, type RealtimeEvent } from '../src/realtime/bus.js';
 
 type MessageDto = {
@@ -233,7 +232,7 @@ describe('POST /api/messages', () => {
         name: 'u7-private.pdf',
         mimeType: 'application/pdf',
         sizeBytes: 10n,
-        storageKey: storage.newStorageKey('u7-private.pdf'),
+        storageKey: 'uploads/test/u7-private.pdf',
         uploadedById: 'u7',
       },
       select: { id: true },
@@ -260,7 +259,7 @@ describe('POST /api/messages', () => {
         name: 'mine.txt',
         mimeType: 'text/plain',
         sizeBytes: 5n,
-        storageKey: storage.newStorageKey('mine.txt'),
+        storageKey: 'uploads/test/mine.txt',
         uploadedById: 'u1',
       },
       select: { id: true },

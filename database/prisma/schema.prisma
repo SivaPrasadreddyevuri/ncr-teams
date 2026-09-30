@@ -323,9 +323,31 @@ model File {
   // BigInt: a file can exceed 2^31 bytes. **Throws on JSON.stringify**, so
   // every response must convert it. See backend/src/serialise.ts.
   sizeBytes BigInt
-  // Server-generated key, never the client-supplied name -- a path built from
-  // user input is a directory-traversal bug waiting to happen.
+  // Server-generated, stable identity for these bytes. Not a path any more:
+  // the content lives in `content` below. Kept because it is what the seed and
+  // the demo materialiser address, and because it makes the migration additive
+  // rather than destructive.
   storageKey String   @unique
+
+  /*
+   * The bytes.
+   *
+   * `Bytes?` maps to `bytea`. Nullable, and the nullability is the point: a
+   * folder has no content, and a row can exist before its bytes are attached --
+   * `npm run db:seed` writes metadata and `demo:files` fills them in.
+   *
+   * Storing the bytes here rather than on disk means a row and its content live
+   * and die together. On an ephemeral filesystem they did not: the row survived a
+   * deploy and the object did not, which is why the download route had a 410
+   * branch to explain a file that was known to exist and was gone.
+   *
+   * `bytea` rather than a large object, deliberately. A large object streams and
+   * does not bloat the heap, which is the right answer for large files; the
+   * upload cap keeps this well inside the range where that matters, and a
+   * large object would mean raw SQL on the download path. The step up, if the
+   * cap ever needs raising, is `pg_largeobject`.
+   */
+  content Bytes?
 
   teamId     String?
   channelId  String?

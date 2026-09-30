@@ -2,8 +2,8 @@
 
 Prisma 6.19 schema, migrations and demo seed for NCR Teams.
 
-**Status: built.** Two migrations, 19 models (20 tables — `File.starredBy` gets
-an implicit join table), 10 enums. The migrations apply cleanly to an empty
+**Status: built.** Five migrations, 18 models (19 tables — `File.starredBy` gets
+an implicit join table), 9 enums. The migrations apply cleanly to an empty
 database and CI replays them, seeds and verifies on every push.
 
 This workspace is **not deployed**. It is the schema of record; the application
@@ -20,6 +20,7 @@ the fixtures disagreed, the fixtures won and the difference is recorded inline i
 | --- | --- |
 | `Message.userId` | The fixture calls this `authorId`. The API maps it, so the column is named for what it is. |
 | `File.sizeBytes` | `BigInt`, because a file can exceed 2^31. **It throws on `JSON.stringify`** — see below. |
+| `File.content` | Nullable `Bytes` (`bytea`), not a path to somewhere else. The bytes live in the row. Null means "no content" — a folder, or a seeded row `demo:files` has not filled. |
 | `Attendance.date` | A `date` column, not a timestamp. An attendance day is calendar-local. |
 | `LeaveRequest.fromDate` | A timestamp, not a `date`. The leave form captures a window *inside* a day ("09:00 to 17:00"), so truncating to a date would discard what the user typed. |
 | `Channel` | No `lastMessage`, `lastAt` or `unread` column. All three are derived — see below. |
@@ -32,6 +33,22 @@ the fixtures disagreed, the fixtures won and the difference is recorded inline i
 typecheck. Every API response that includes a file must convert it. The seed
 asserts this deliberately: `db:verify` checks that serialising a raw row throws,
 so the trap stays visible.
+
+### `bytea`, and why the cap is 5 MB
+
+`File.content` is the file's bytes. The obvious alternative — metadata here, a
+`storageKey` pointing at a file on disk — was the previous arrangement, and on
+Render's free tier the filesystem is wiped on every deploy while the rows
+survive. That produced a routine "row exists, content does not" state which
+needed a 410 branch to explain. Storing the bytes in the row removes the state
+instead of documenting it.
+
+`bytea` is only the right choice while files are small, which the 5 MB upload cap
+enforces. `db:verify` checks that `sizeBytes` equals the real length of any
+attached content, because that value is set into `Content-Length` and a
+disagreement would make a download hang or truncate. If genuine multi-megabyte
+uploads ever matter, the content belongs in object storage and `File` keeps a key
+again.
 
 ## Deliberately derived, not denormalised
 

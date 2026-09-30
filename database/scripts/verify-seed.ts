@@ -155,7 +155,39 @@ async function main() {
 
   // sizeBytes is BigInt, which throws on JSON.stringify. If an API ever forgets
   // to convert it, the response dies at serialisation time, so assert here.
-  check('sizeBytes survives a JSON round-trip', Number(f5.sizeBytes), 4_400_000);
+  //
+  // The assertion is about the type, not about a particular value: `demo:files`
+  // rewrites sizeBytes to the real length of the content it attaches, so a
+  // hard-coded number would only pass before that script had run.
+  check('sizeBytes is a bigint', typeof f5.sizeBytes, 'bigint');
+  check('sizeBytes converts to a number', typeof Number(f5.sizeBytes), 'number');
+
+  // Where content is attached, the declared size must match what is actually
+  // stored. A mismatch would make Content-Length lie, so a download would hang
+  // or truncate -- and a DTO reporting the wrong size would show it in the UI.
+  //
+  // These hold whether or not `demo:files` has run. Before it has, every
+  // non-folder row has no content and the mismatch list is trivially empty; the
+  // checks are written to be valid in both states rather than only after the
+  // demo script, because `db:verify` is also run against a bare `db:seed`.
+  const withContent = await prisma.file.findMany({
+    where: { content: { not: null } },
+    select: { id: true, name: true, sizeBytes: true, content: true, isFolder: true },
+  });
+  check(
+    'every attached file declares its real length',
+    withContent.filter((f) => Number(f.sizeBytes) !== (f.content as Uint8Array).byteLength).map((f) => f.id),
+    [],
+  );
+  check('a folder never carries content', withContent.filter((f) => f.isFolder).map((f) => f.id), []);
+  // Six is the seeded non-folder count, so this catches a row that was deleted
+  // from one side of the table but not the other.
+  check(
+    'content is attached to no more files than exist',
+    withContent.length <= (await prisma.file.count({ where: { isFolder: false } })),
+    true,
+  );
+
   const serialised = (() => {
     try {
       JSON.stringify(f5);

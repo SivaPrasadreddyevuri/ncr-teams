@@ -180,7 +180,58 @@ if (fileId) {
   });
   const text = await download.text();
   check('download returns the exact bytes', download.status === 200 && text === payload, `got ${download.status}: ${text.slice(0, 40)}`);
+
+  // Content-Length is set from the stored sizeBytes, so a row whose declared size
+  // disagreed with its content would pass the comparison above and still hang or
+  // truncate a real browser download.
+  const declared = download.headers.get('content-length');
+  check('content-length matches the body', declared === String(text.length), `declared ${declared}, body ${text.length}`);
+
   await call('DELETE', `/api/files/${fileId}`);
+
+  // A soft delete has to clear the content, or the file is still one request away
+  // and the row still occupies the space the delete was meant to reclaim.
+  const afterDelete = await fetch(`${BASE}/api/files/${fileId}/download`, {
+    headers: { cookie: jar() },
+  });
+  absorb(afterDelete);
+  check(
+    'a deleted file is no longer downloadable',
+    afterDelete.status === 410,
+    `got ${afterDelete.status}, expected 410`,
+  );
+}
+
+/* 8b. A seeded file, whose content was attached by `demo:files`.
+
+   The round-trip above only proves the upload path works. This proves the path a
+   viewer of the demo actually clicks: a row that was created by the seed with no
+   content, and later given some by the materialise script. */
+{
+  const listing = await call('GET', '/api/files');
+  const files = (listing.json as { files?: Array<{ id: string; name: string; uploaded: boolean }> }).files ?? [];
+  const seeded = files.find((f) => f.name === 'api-spec.md');
+  check('a seeded file is listed', Boolean(seeded), `looked for api-spec.md in ${files.length} files`);
+  check('a seeded file reports uploaded: true', seeded?.uploaded === true, `got ${seeded?.uploaded}`);
+
+  if (seeded) {
+    const download = await fetch(`${BASE}/api/files/${seeded.id}/download`, {
+      headers: { cookie: jar() },
+    });
+    absorb(download);
+    const text = await download.text();
+    check('a seeded file downloads real content', download.status === 200 && text.length > 0, `got ${download.status}, ${text.length} bytes`);
+    check(
+      'a seeded file is served as a download',
+      (download.headers.get('content-disposition') ?? '').startsWith('attachment;'),
+      download.headers.get('content-disposition') ?? 'no content-disposition',
+    );
+    check(
+      'a seeded file is not sniffable as something executable',
+      download.headers.get('x-content-type-options') === 'nosniff',
+      `got ${download.headers.get('x-content-type-options')}`,
+    );
+  }
 }
 
 /* 9. logout invalidates the session */

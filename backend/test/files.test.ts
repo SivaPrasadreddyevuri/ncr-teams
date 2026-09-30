@@ -4,7 +4,7 @@
  * The important assertions are the ones about failure, because a working upload
  * path is easy and a leaky one is what matters: a cap that only applies after the
  * whole body is buffered, a header built from a user-chosen filename, a "deleted"
- * file whose bytes are still one request away.
+ * file whose content is still one request away.
  */
 
 import './setup-env.js';
@@ -13,7 +13,6 @@ import assert from 'node:assert/strict';
 import { readJson, signedInClient, startHarness, type Client, type Harness } from './helpers.js';
 import { EMPLOYEE, HR_ADMIN, TEST_PASSWORD, ensureTestPasswords } from './fixtures.js';
 import { prisma } from '../src/db.js';
-import * as storage from '../src/storage.js';
 import { config } from '../src/config.js';
 
 type FileDto = {
@@ -34,14 +33,12 @@ let client: Client;
 
 before(async () => {
   await ensureTestPasswords();
-  await storage.clearAll();
   harness = await startHarness();
   client = await signedInClient(harness, EMPLOYEE, TEST_PASSWORD);
 });
 
 after(async () => {
   await harness?.close();
-  await storage.clearAll();
 });
 
 beforeEach(async () => {
@@ -89,7 +86,7 @@ function formWith(
 }
 
 describe('upload', () => {
-  it('stores bytes and creates a row', { timeout: 30_000 }, async () => {
+  it('stores the bytes in the row itself', { timeout: 30_000 }, async () => {
     const contents = 'the quick brown fox';
     const response = await client.upload('/api/files', formWith('notes.txt', contents));
 
@@ -102,9 +99,11 @@ describe('upload', () => {
     assert.equal(file.uploaded, true);
     assert.equal(file.starred, false);
 
-    // The row must point at real bytes.
+    // The bytes live in the row, so they cannot be separated from it the way a
+    // filesystem path could be.
     const row = await prisma.file.findUniqueOrThrow({ where: { id: file.id } });
-    assert.equal(await storage.exists(row.storageKey), true);
+    assert.equal(Buffer.from(row.content!).toString('utf8'), contents);
+    assert.equal(Number(row.sizeBytes), contents.length);
   });
 
   it('round-trips the exact bytes through a download', { timeout: 30_000 }, async () => {
@@ -300,15 +299,17 @@ describe('delete', () => {
       await client.upload('/api/files', formWith('deleteme.txt', 'x')),
     );
     const row = await prisma.file.findUniqueOrThrow({ where: { id: file.id } });
+    assert.notEqual(row.content, null);
 
     const response = await client.delete(`/api/files/${file.id}`);
     assert.equal(response.status, 200);
 
     const after = await prisma.file.findUniqueOrThrow({ where: { id: file.id } });
     assert.ok(after.deletedAt, 'the row must survive as a tombstone');
-    // A soft delete that leaves the object means a "deleted" file is still one
-    // request away.
-    assert.equal(await storage.exists(row.storageKey), false);
+    // A soft delete that leaves the content means a "deleted" file is still one
+    // request away, and the row still occupies the space the delete was meant to
+    // reclaim.
+    assert.equal(after.content, null);
   });
 
   it("refuses to delete somebody else's file", async () => {
@@ -330,7 +331,7 @@ describe('delete', () => {
         name: 'inside.txt',
         mimeType: 'text/plain',
         sizeBytes: 1n,
-        storageKey: storage.newStorageKey('inside.txt'),
+        storageKey: 'uploads/test/inside.txt',
         uploadedById: 'u1',
         folderId: 'f1',
       },
