@@ -4248,3 +4248,14 @@ button {
     max-width: 100%;
   }
 }
+/*
+ * Composer status line: says whether the thread above it is live or saved.
+ *
+ * Small and deliberately quiet. It exists because a demo that silently mixes
+ * live and fixture data cannot be told apart from one that is broken.
+ */
+.composer-status {
+  margin: 0 0 6px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}

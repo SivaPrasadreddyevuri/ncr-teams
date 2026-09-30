@@ -1,10 +1,12 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Paperclip, Send, Hash, MessageSquare, X, ChevronLeft } from 'lucide-react';
 import { PersonAvatar } from '@/components/profile/PersonAvatar';
 import { useActivePerson } from '@/components/profile/ProfileProvider';
 import { relativeTime } from '@/lib/format';
+import { api, ApiError, type ChatMessage as LiveMessage } from '@/lib/api';
+import { RealtimeClient, type RealtimeStatus } from '@/lib/realtime';
 import type { Channel, ChatMessage, Person } from '@/lib/data';
 
 type Thread = 'chat' | 'files' | 'meetings';
@@ -14,6 +16,24 @@ const THREADS: Array<{ id: Thread; label: string }> = [
   { id: 'files', label: 'Files' },
   { id: 'meetings', label: 'Meetings' },
 ];
+
+/**
+ * A message that exists only in this browser.
+ *
+ * Used when there is no session, so the composer still responds. The id is
+ * marked as local and never sent, so it cannot collide with a real one.
+ */
+function localEcho(authorId: string, channelId: string, body: string): ChatMessage {
+  return {
+    id: `local-${authorId}-${Date.now()}`,
+    channelId,
+    authorId,
+    body,
+    createdAt: new Date().toISOString(),
+    reactions: [],
+    attachments: [],
+  };
+}
 
 export function ChatClient({
   channels,
@@ -48,6 +68,104 @@ export function ChatClient({
 
   const active = channels.find((c) => c.id === activeId) ?? channels[0];
 
+  /* ---------------------------------------------------------------- */
+  /* Live data                                                        */
+  /* ---------------------------------------------------------------- */
+
+  /*
+   * The fixtures are still the fallback, and that is deliberate rather than
+   * unfinished: the rest of the app reads from them, and a visitor who reaches
+   * /chat before signing in should see a working thread rather than an error.
+   * Once the API answers, the thread is replaced with the real one.
+   */
+  const [live, setLive] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [connection, setConnection] = useState<RealtimeStatus>('closed');
+
+  // Read inside the socket handler, which is created once. Without a ref the
+  // handler would close over the first channel and never see a change.
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
+
+  useEffect(() => {
+    if (!active) return;
+    // `cancelled` because switching channels mid-request would otherwise let a
+    // slower earlier response overwrite the newer one.
+    let cancelled = false;
+    const channelId = active.id;
+
+    setNotice(null);
+
+    api
+      .messages(channelId)
+      .then(({ messages }) => {
+        if (cancelled) return;
+        setAllMessages(messages);
+        setLive(true);
+      })
+      .catch((cause: unknown) => {
+        if (cancelled) return;
+        // Unauthenticated is the expected case for a visitor who has not signed
+        // in, and retrying cannot fix it, so the fixtures stay and no socket is
+        // opened.
+        setLive(false);
+        if (!(cause instanceof ApiError && cause.isUnauthorised)) {
+          setNotice('Could not reach the server. Showing saved messages.');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // `live` is deliberately not a dependency: it is set by this effect, and
+    // listing it would re-run the load in a loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.id]);
+
+  // One socket for the page, resubscribed when the channel changes.
+  useEffect(() => {
+    if (!live || !active) return;
+    const channelId = active.id;
+
+    const client = new RealtimeClient({
+      onStatus: setConnection,
+      onFrame: (frame) => {
+        if (frame.type !== 'message.created' && frame.type !== 'message.updated') return;
+        const incoming = frame.payload.message as LiveMessage | undefined;
+        if (!incoming || incoming.channelId !== activeIdRef.current) return;
+
+        setAllMessages((current) => {
+          const at = current.findIndex((m) => m.id === incoming.id);
+          // Replace in place for a reaction change, append for a new message.
+          if (at !== -1) {
+            const next = [...current];
+            next[at] = incoming;
+            return next;
+          }
+          return [...current, incoming];
+        });
+      },
+    });
+
+    void client.connect();
+    client.subscribe([channelId]);
+
+    // Closed on unmount and on every channel change. This is not the same as
+    // the client's own reconnect, which handles the server going away.
+    return () => {
+      client.close();
+    };
+  }, [live, active?.id]);
+
+  // Marking read is a nicety; a failure must not surface as an error.
+  useEffect(() => {
+    if (!live || !active) return;
+    const channelId = active.id;
+    void api.markChannelRead(channelId).catch(() => undefined);
+  }, [live, active?.id]);
+
+
   const threadMessages = useMemo(
     () => allMessages.filter((m) => m.channelId === activeId),
     [allMessages, activeId],
@@ -67,21 +185,33 @@ export function ChatClient({
   function send(event: React.FormEvent) {
     event.preventDefault();
     const body = draft.trim();
-    if (!body || !active) return;
+    if (!body || !active || sending) return;
 
-    setAllMessages((current) => [
-      ...current,
-      {
-        id: `local-${currentUserId}-${Date.now()}`,
-        channelId: active.id,
-        authorId: currentUserId,
-        body,
-        createdAt: new Date().toISOString(),
-        reactions: [],
-        attachments: [],
-      },
-    ]);
     setDraft('');
+    setSending(true);
+
+    if (!live) {
+      // No session, or the API is unreachable. Append locally so the thread still
+      // responds, and say so rather than pretending it was delivered.
+      setAllMessages((current) => [...current, localEcho(currentUserId, active.id, body)]);
+      setNotice('Not signed in, so this message was not sent.');
+      setSending(false);
+      return;
+    }
+
+    api
+      .sendMessage(active.id, body)
+      .then(({ message }) => {
+        // Append the server's copy rather than the local echo: it carries the
+        // real id, the real timestamp and the trimmed body.
+        setAllMessages((current) => (current.some((m) => m.id === message.id) ? current : [...current, message]));
+        setNotice(null);
+      })
+      .catch((cause: unknown) => {
+        setDraft(body);
+        setNotice(cause instanceof ApiError ? cause.message : 'Could not send that message.');
+      })
+      .finally(() => setSending(false));
   }
 
   return (
@@ -239,6 +369,28 @@ export function ChatClient({
               )}
             </div>
 
+            {/*
+              Whether this thread is real. Shown because a demo that silently
+              mixes live and fixture data is impossible to tell apart from one
+              that is not working -- and the distinction matters when someone is
+              judging whether the app does what it claims.
+            */}
+            <p className="composer-status" role="status">
+              {!live ? 'Saved messages — sign in for live chat' : (
+                connection === 'open'
+                  ? 'Live'
+                  : connection === 'reconnecting'
+                    ? 'Reconnecting…'
+                    : 'Connecting…'
+              )}
+            </p>
+
+            {notice && (
+              <p className="form-error" role="alert">
+                {notice}
+              </p>
+            )}
+
             <form className="composer" onSubmit={send}>
               <input
                 placeholder={`Message #${active?.name ?? ''}`}
@@ -255,7 +407,12 @@ export function ChatClient({
               >
                 <Paperclip size={16} />
               </button>
-              <button className="send" type="submit" disabled={!draft.trim()} aria-label="Send message">
+              <button
+                className="send"
+                type="submit"
+                disabled={!draft.trim() || sending}
+                aria-label="Send message"
+              >
                 <Send size={16} />
               </button>
             </form>
