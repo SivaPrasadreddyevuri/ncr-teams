@@ -340,15 +340,18 @@ so the sidebar and topbar paint immediately and only the page body is replaced.
 Three decisions in it are deliberate rather than obvious:
 
 - **A hard load shows no skeleton at all.** The first effect run is skipped, so a
-  refresh paints real content immediately. Holding first paint for three seconds
-  would make the app look slower than it is, and the first impression is the part
-  worth protecting. The distinction leans on `usePathname` changing: a navigation
-  re-renders the gate, a hard load only ever mounts it once.
+  refresh paints real content immediately. Holding first paint for the full
+  skeleton delay would make the app look slower than it is, and the first
+  impression is the part worth protecting. The distinction leans on
+  `usePathname` changing: a navigation re-renders the gate, a hard load only ever
+  mounts it once.
 - **The real markup stays in the DOM**, `hidden` rather than unmounted. It is
   still in the static HTML for crawlers and the reveal needs nothing fetched.
-- **Reduced motion shortens the wait to 600ms.** The shimmer is already disabled
-  for those users, so three seconds would mean three seconds of a *static* grey
-  page — strictly worse than the animated one.
+- **Reduced motion gets a fifth of that wait — 200ms against 1s.** The shimmer is
+  already disabled for those users, so a full-length wait would be a full-length
+  *static* grey page. The ratio is expressed as `LOADING_MS / 5` rather than a
+  literal, because at 600ms against a 1s wait it was 60% of the delay and had
+  all but cancelled the point of the branch.
 
 Each skeleton mirrors its own screen — the same grid classes, the same column
 count, the same row shapes — and that includes the responsive behaviour. The
