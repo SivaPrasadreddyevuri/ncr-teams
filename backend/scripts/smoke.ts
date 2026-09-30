@@ -6,6 +6,18 @@
  * on -- which is the part that unit tests of the client cannot prove.
  *
  * Run with the API already listening on API_PORT (default 4000).
+ *
+ * ## It writes to the database, and does not undo all of it
+ *
+ * It posts a message and soft-deletes a file, because that is the flow being
+ * tested and neither can be exercised read-only. Both leave rows behind: a
+ * soft delete is a tombstone by design, and there is no endpoint that removes a
+ * row outright.
+ *
+ * So `npm run db:verify` will fail on three count checks after a smoke run, and
+ * that is this script's doing rather than a defect. The fix is `npm run db:demo`,
+ * which resets and reseeds. The check is announced at the end rather than left
+ * to be discovered as a phantom failure.
  */
 
 const BASE = process.env.SMOKE_BASE ?? 'http://127.0.0.1:4000';
@@ -234,6 +246,62 @@ if (fileId) {
   }
 }
 
+/* 8c. Search.
+
+   The unit tests cover ranking and the membership gate. This covers the part a
+   unit test cannot: that a real session cookie, a real URL and the generated
+   columns in a real database produce hits. A search that 401s in production while
+   passing its tests would be a broken search box. */
+{
+  const found = await call('GET', '/api/search?q=design&limit=20');
+  check('search returns 200', found.status === 200, `got ${found.status}`);
+
+  const body = found.json as {
+    results?: Array<{ id: string; scope: string; title: string; snippet: string | null; rank: number }>;
+    counts?: Record<string, number>;
+  };
+  const results = body.results ?? [];
+  check('search finds something for "design"', results.length > 0, `got ${results.length} results`);
+  check(
+    'a message hit carries a server-side snippet',
+    results.some((r) => r.scope === 'messages' && r.snippet?.includes('<mark>')),
+    `snippets: ${JSON.stringify(results.map((r) => r.snippet))}`,
+  );
+  check(
+    'a substring match survives: dashboard-design.fig for "design"',
+    results.some((r) => r.title === 'dashboard-design.fig'),
+    `titles: ${JSON.stringify(results.map((r) => r.title))}`,
+  );
+  check(
+    'results arrive ranked',
+    results.every((r, i) => i === 0 || r.rank <= results[i - 1]!.rank),
+    `ranks: ${JSON.stringify(results.map((r) => r.rank))}`,
+  );
+  check(
+    'counts cover every scope',
+    ['people', 'messages', 'files', 'events', 'teams'].every(
+      (scope) => typeof body.counts?.[scope] === 'number',
+    ),
+    `counts: ${JSON.stringify(body.counts)}`,
+  );
+
+  const filesOnly = await call('GET', '/api/search?q=design&scope=files');
+  const filesBody = filesOnly.json as { results?: Array<{ scope: string }>; counts?: Record<string, number> };
+  check(
+    'a narrowed scope returns only that scope',
+    (filesBody.results ?? []).every((r) => r.scope === 'files'),
+    `scopes: ${JSON.stringify((filesBody.results ?? []).map((r) => r.scope))}`,
+  );
+  check(
+    'a narrowed scope still reports counts for the scopes it hid',
+    typeof filesBody.counts?.messages === 'number',
+    `counts: ${JSON.stringify(filesBody.counts)}`,
+  );
+
+  const bad = await call('GET', '/api/search?q=design&scope=nonsense');
+  check('an unknown scope is rejected', bad.status === 400, `got ${bad.status}`);
+}
+
 /* 9. logout invalidates the session */
 r = await call('POST', '/api/auth/logout');
 check('logout is 204', r.status === 204, `got ${r.status}`);
@@ -241,6 +309,15 @@ r = await call('GET', '/api/auth/me');
 check('me is 401 after logout', r.status === 401, `got ${r.status}`);
 
 console.log(failures === 0 ? '\nall smoke checks passed' : `\n${failures} smoke check(s) failed`);
+
+// Announced rather than left to be found: three `db:verify` count checks will now
+// fail until the database is reseeded, and a count check failing straight after a
+// green smoke run looks like one of the two is wrong.
+console.log(
+  '\nNote: this run posted a message and soft-deleted a file, so both leave rows\n' +
+    'behind. `npm run db:verify` checks row counts and will fail until the database\n' +
+    'is reset with `npm run db:demo`.',
+);
 // Not process.exit(): tearing the process down while a socket handle is still
 // closing trips a libuv assertion on Windows and buries the real output.
 process.exitCode = failures === 0 ? 0 : 1;

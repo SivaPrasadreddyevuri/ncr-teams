@@ -1,34 +1,36 @@
 {
-  "name": "@ncr-teams/database",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "description": "Prisma schema, migrations and seed data for NCR Teams.",
-  "scripts": {
-    "generate": "prisma generate",
-    "validate": "prisma validate",
-    "migrate": "prisma migrate dev",
-    "deploy": "prisma migrate deploy",
-    "status": "prisma migrate status",
-    "reset": "prisma migrate reset --force",
-    "studio": "prisma studio",
-    "seed": "node --import tsx prisma/seed.ts",
-    "verify": "node --import tsx scripts/verify-seed.ts",
-    "bootstrap": "node --import tsx scripts/create-database.ts",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@prisma/client": "6.19.3",
-    "dotenv": "^16.4.7"
-  },
-  "devDependencies": {
-    "@types/pg": "^8.23.1",
-    "pg": "^8.13.1",
-    "prisma": "6.19.3",
-    "tsx": "4.23.15",
-    "typescript": "^5.7.3"
-  },
-  "prisma": {
-    "seed": "node --import tsx prisma/seed.ts"
-  }
+    "name":  "@ncr-teams/database",
+    "version":  "0.1.0",
+    "private":  true,
+    "type":  "module",
+    "description":  "Prisma schema, migrations and seed data for NCR Teams.",
+    "scripts":  {
+                    "generate":  "prisma generate",
+                    "validate":  "prisma validate",
+                    "migrate":  "prisma migrate dev",
+                    "deploy":  "prisma migrate deploy",
+                    "drift":  "node --import tsx scripts/verify-no-unexpected-drift.ts",
+                    "status":  "prisma migrate status",
+                    "reset":  "prisma migrate reset --force",
+                    "studio":  "prisma studio",
+                    "seed":  "node --import tsx prisma/seed.ts",
+                    "verify":  "node --import tsx scripts/verify-seed.ts",
+                    "verify:plans":  "node --import tsx scripts/verify-search-plans.ts",
+                    "bootstrap":  "node --import tsx scripts/create-database.ts",
+                    "typecheck":  "tsc --noEmit"
+                },
+    "dependencies":  {
+                         "@prisma/client":  "6.19.3",
+                         "dotenv":  "^16.4.7"
+                     },
+    "devDependencies":  {
+                            "@types/pg":  "^8.23.1",
+                            "pg":  "^8.13.1",
+                            "prisma":  "6.19.3",
+                            "tsx":  "4.23.15",
+                            "typescript":  "^5.7.3"
+                        },
+    "prisma":  {
+                   "seed":  "node --import tsx prisma/seed.ts"
+               }
 }

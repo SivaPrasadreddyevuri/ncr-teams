@@ -2,7 +2,7 @@
 
 Prisma 6.19 schema, migrations and demo seed for NCR Teams.
 
-**Status: built.** Five migrations, 18 models (19 tables — `File.starredBy` gets
+**Status: built.** Six migrations, 18 models (19 tables — `File.starredBy` gets
 an implicit join table), 9 enums. The migrations apply cleanly to an empty
 database and CI replays them, seeds and verifies on every push.
 
@@ -49,6 +49,55 @@ attached content, because that value is set into `Content-Length` and a
 disagreement would make a download hang or truncate. If genuine multi-megabyte
 uploads ever matter, the content belongs in object storage and `File` keeps a key
 again.
+
+## Search: what PostgreSQL is doing that a string comparison could not
+
+Five tables carry a `searchVector` column, added by
+`20260930090000_search_indexes` as `GENERATED ALWAYS AS ... STORED` with a GIN
+index. Generated rather than trigger-maintained, because a trigger is code that
+has to remember to run and its failure mode is an index that silently returns
+nothing for rows written after the last time it did.
+
+Two kinds of match, because they answer different questions:
+
+| Where | How | Why not the other one |
+| --- | --- | --- |
+| `Message.body` | `to_tsvector('english', ...)` | Stemming. "deploy" finds "Deploy", "deployed", "deployment". A substring comparison finds none of them. |
+| `User`, `File`, `Team`, `CalendarEvent` | `to_tsvector('simple', ...)` | **No** stemming. `english` reduces "Chris" to "chri", so a search for someone's own name stops matching them. |
+| `User.name`, `File.name` | `pg_trgm` similarity | A tsvector only matches whole lexemes, so it cannot find `dashboard-design.fig` from "design". Trigrams can. |
+
+`pg_trgm` is the reason substring search survived the move to the database, and
+it is also the reason the query is written with the `%` operator rather than
+`similarity(name, q) > 0.3`. Both mean the same thing, but only the operator form
+reaches the index — see the negative control in `npm run db:verify:plans`.
+
+### `migrate dev` is not used, and cannot be
+
+This is the one part of the schema Prisma cannot represent. `prisma migrate diff`
+reports all five generated columns as drifted and all five GIN indexes as
+removable:
+
+```
+[*] Altered column `searchVector` (default changed from Some(DbGenerated(...)) to None)
+[-] Removed index on columns (searchVector)
+```
+
+So `migrate dev` would helpfully write a migration that drops the generation
+expressions and the indexes. It applies cleanly, the app keeps working, and search
+returns nothing forever after — the only symptom is an empty search box.
+
+Therefore:
+
+- Migrations are hand-written and applied with `npm run db:deploy`.
+- `npm run db:drift` asserts the diff still contains *only* the known entries. A
+  genuinely unintended change fails the check instead of hiding among the five
+  expected ones.
+- `npm run db:verify:plans` asserts the indexes are actually usable, which is the
+  failure a missing index would produce.
+
+Declaring the columns as `Unsupported("tsvector")?` stops Prisma reporting them
+as *missing*, which shortens the allowlist. It does not protect them, and the
+schema comment says so rather than implying a safety that does not exist.
 
 ## Deliberately derived, not denormalised
 

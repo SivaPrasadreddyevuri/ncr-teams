@@ -1,38 +1,40 @@
 {
-  "name": "ncr-teams",
-  "version": "0.1.0",
-  "private": true,
-  "description": "Microsoft Teams-style collaboration workspace: frontend, backend and database.",
-  "workspaces": [
-    "frontend",
-    "backend",
-    "database"
-  ],
-  "scripts": {
-    "dev": "npm run dev --workspace frontend",
-    "dev:api": "npm run dev --workspace backend",
-    "build": "npm run build --workspace frontend",
-    "start": "npm run start --workspace frontend",
-    "preview": "npm run build --workspace frontend && npm run start --workspace frontend",
-    "typecheck": "npm run typecheck --workspace frontend && npm run typecheck --workspace backend && npm run typecheck --workspace database",
-    "test": "npm run test --workspace backend && npm run test --workspace frontend",
-    "demo:signin": "npm run demo:signin --workspace backend",
-    "demo:files": "npm run demo:files --workspace backend",
-    "smoke": "npm run smoke --workspace backend",
-    "postinstall": "npm run db:generate",
-    "db:generate": "npm run generate --workspace database",
-    "db:validate": "npm run validate --workspace database",
-    "db:migrate": "npm run migrate --workspace database",
-    "db:deploy": "npm run deploy --workspace database",
-    "db:status": "npm run status --workspace database",
-    "db:reset": "npm run reset --workspace database",
-    "db:seed": "npm run seed --workspace database",
-    "db:verify": "npm run verify --workspace database",
-    "db:studio": "npm run studio --workspace database",
-    "db:bootstrap": "npm run bootstrap --workspace database",
-    "db:demo": "npm run db:reset && npm run demo:signin && npm run demo:files"
-  },
-  "engines": {
-    "node": "24.x"
-  }
+    "name":  "ncr-teams",
+    "version":  "0.1.0",
+    "private":  true,
+    "description":  "Microsoft Teams-style collaboration workspace: frontend, backend and database.",
+    "workspaces":  [
+                       "frontend",
+                       "backend",
+                       "database"
+                   ],
+    "scripts":  {
+                    "dev":  "npm run dev --workspace frontend",
+                    "dev:api":  "npm run dev --workspace backend",
+                    "build":  "npm run build --workspace frontend",
+                    "start":  "npm run start --workspace frontend",
+                    "preview":  "npm run build --workspace frontend \u0026\u0026 npm run start --workspace frontend",
+                    "typecheck":  "npm run typecheck --workspace frontend \u0026\u0026 npm run typecheck --workspace backend \u0026\u0026 npm run typecheck --workspace database",
+                    "test":  "npm run test --workspace backend \u0026\u0026 npm run test --workspace frontend",
+                    "demo:signin":  "npm run demo:signin --workspace backend",
+                    "demo:files":  "npm run demo:files --workspace backend",
+                    "smoke":  "npm run smoke --workspace backend",
+                    "postinstall":  "npm run db:generate",
+                    "db:generate":  "npm run generate --workspace database",
+                    "db:validate":  "npm run validate --workspace database",
+                    "db:migrate":  "npm run migrate --workspace database",
+                    "db:deploy":  "npm run deploy --workspace database",
+                    "db:drift":  "npm run drift --workspace database",
+                    "db:status":  "npm run status --workspace database",
+                    "db:reset":  "npm run reset --workspace database",
+                    "db:seed":  "npm run seed --workspace database",
+                    "db:verify":  "npm run verify --workspace database",
+                    "db:verify:plans":  "npm run verify:plans --workspace database",
+                    "db:studio":  "npm run studio --workspace database",
+                    "db:bootstrap":  "npm run bootstrap --workspace database",
+                    "db:demo":  "npm run db:reset \u0026\u0026 npm run demo:signin \u0026\u0026 npm run demo:files"
+                },
+    "engines":  {
+                    "node":  "24.x"
+                }
 }

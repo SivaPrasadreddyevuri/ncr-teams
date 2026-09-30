@@ -145,6 +145,11 @@ model User {
   department   Department? @relation("DepartmentMembers", fields: [departmentId], references: [id], onDelete: SetNull)
   headedDepartments Department[] @relation("DepartmentHead")
 
+  // Full-text search vector over name, jobTitle and bio. Generated in the
+  // migration. 'simple' rather than 'english' because stemming would stop a
+  // search for someone's own name from matching them.
+  searchVector Unsupported("tsvector")?
+
   memberships      TeamMember[]
   channelStates    ChannelReadState[]
   messages         Message[]
@@ -209,8 +214,12 @@ model Team {
   name        String?
   description String?
   createdBy   String?
-  createdAt   DateTime @default(now())
-  id          String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  id        String   @id @default(cuid())
+
+  // Full-text search vector over name and description, generated in the
+  // migration. Both are nullable, which is why its expression coalesces.
+  searchVector Unsupported("tsvector")?
 
   members  TeamMember[]
   channels Channel[]
@@ -282,6 +291,28 @@ model Message {
   editedAt   DateTime?
   deletedAt  DateTime?
 
+  // Full-text search vector, maintained by the database.
+  //
+  // `Unsupported` because Prisma has no tsvector type. Declaring it is still
+  // better than leaving it out: it stops `migrate diff` reporting the column as
+  // missing, so the allowlist in scripts/verify-no-unexpected-drift.ts only has
+  // to name the generation expression and the indexes.
+  //
+  // What it does NOT do is protect the column or its index. Prisma cannot
+  // represent a GENERATED ALWAYS expression, so it still reports the default as
+  // drifted, and it reports all five GIN indexes as removable. `migrate dev`
+  // would therefore generate a migration that strips the generation expressions
+  // and drops the indexes -- leaving search silently returning nothing.
+  //
+  // That is why this project applies migrations with `db:deploy` and hand-writes
+  // them, and why CI checks the diff against an explicit allowlist. See
+  // database/README.md.
+  //
+  // GENERATED ALWAYS AS ... STORED in the migration, so it cannot drift from
+  // `body`. An empty body (a soft delete blanks it) yields an empty vector, so a
+  // deleted message stops being findable without the query having to know.
+  searchVector Unsupported("tsvector")?
+
   user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   channel Channel? @relation(fields: [channelId], references: [id], onDelete: Cascade)
   meeting Meeting? @relation(fields: [meetingId], references: [id], onDelete: Cascade)
@@ -348,6 +379,11 @@ model File {
    * cap ever needs raising, is `pg_largeobject`.
    */
   content Bytes?
+
+  // Full-text search vector over the name, generated in the migration. Trigram
+  // matching is on the name itself (File_name_trgm_idx) rather than here, so
+  // that "design" still finds "redesign-notes.md".
+  searchVector Unsupported("tsvector")?
 
   teamId     String?
   channelId  String?
@@ -433,6 +469,9 @@ model CalendarEvent {
   // meeting can be cancelled without losing the event.
   meetingId  String?   @unique
   createdAt  DateTime  @default(now())
+
+  // Full-text search vector over title and location, generated in the migration.
+  searchVector Unsupported("tsvector")?
 
   organizer User              @relation("EventOrganizer", fields: [organizerId], references: [id])
   meeting   Meeting?          @relation(fields: [meetingId], references: [id])

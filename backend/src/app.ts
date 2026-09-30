@@ -20,6 +20,7 @@ import { departmentsRouter } from './routes/departments.js';
 import { activityRouter } from './routes/activity.js';
 import { messagesRouter } from './routes/messages.js';
 import { filesRouter } from './routes/files.js';
+import { searchRouter } from './routes/search.js';
 
 export function createApp(): Express {
   const app = express();
@@ -68,6 +69,7 @@ export function createApp(): Express {
   app.use('/api/activity', activityRouter());
   app.use('/api/messages', messagesRouter());
   app.use('/api/files', filesRouter());
+app.use('/api/search', searchRouter());
 
   // A path-free handler, so this does not depend on Express 5's wildcard syntax
   // (path-to-regexp v8 removed bare `*` in favour of named segments).

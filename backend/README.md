@@ -294,6 +294,43 @@ to migrate the same schema.
 so whoever first deploys has to copy it from the dashboard into `backend/.env` or
 a local session cookie will not verify against production.
 
+## Search
+
+One endpoint, five entity types, ranked in the database. `src/routes/search.ts`.
+
+Raw SQL because the page it replaced scored a fixture array in the browser — it
+read every row, scored each in JavaScript, and then discarded most of them. That
+cannot work against a real table, because ranking has to happen *before* the
+limit.
+
+Four things in it are load-bearing.
+
+**The union is a reusable `Prisma.sql` fragment.** The results and the per-scope
+counts come from the same ranked rows, so the union is written once. A second copy
+would be a hundred lines edited in two places, and a page whose chips disagree
+with its results is worse than no chips.
+
+**Every branch runs regardless of the requested scope; the filter is applied
+after ranking.** Ranking is only comparable within one set — filtering inside each
+branch would rank each scope against itself. And the counts have to come from the
+same set the results do, or a chip reads "Files 4" above two files.
+
+**The counts are a second statement, not a window function.** The first has a
+`LIMIT`, so `count(*) OVER (PARTITION BY scope)` there would count the twenty rows
+that survived it — exactly the number that must not be shown.
+
+**Messages are gated on channel membership in the query.** A search box that
+returns the contents of channels you are not in is a way to read them without
+opening them. The `EXISTS` is correlated against the caller's memberships, so the
+gate lives in the statement rather than in a lookup a second query could forget.
+
+Ranking itself is `ts_rank_cd` over the stored `tsvector`, plus trigram similarity
+on names. Snippets come from `ts_headline`, because only the database knows which
+words the `tsquery` matched.
+
+See `database/README.md` for why the vector is a generated column, and
+`npm run db:verify:plans` for how the indexes are asserted.
+
 ## Demo sign-in
 
 ```bash

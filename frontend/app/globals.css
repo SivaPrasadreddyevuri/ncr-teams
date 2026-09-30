@@ -2970,6 +2970,20 @@ button {
   margin: 14px 0 10px;
 }
 
+/* Marks results that came from the fixture fallback rather than the API.
+   The point is that they are not presented as live data: a down API should
+   look like a worse search, not like a working one. */
+.search-stale {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--color-brand-soft);
+}
+
 .result-list {
   list-style: none;
   margin: 0;

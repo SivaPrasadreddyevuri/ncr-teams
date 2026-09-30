@@ -143,6 +143,28 @@ export type Channel = {
   memberIds: string[];
 };
 
+/**
+ * One search hit.
+ *
+ * `snippet` is server-rendered HTML-ish text: `ts_headline` wraps the matched
+ * words in `<mark>` server-side, because only the database knows which words the
+ * tsquery actually matched. The page renders it as text with those markers turned
+ * into elements -- it is never passed to dangerouslySetInnerHTML, since the
+ * surrounding text is user-authored and this is a page reachable without any
+ * sanitisation step.
+ */
+export type SearchResult = {
+  id: string;
+  scope: 'people' | 'messages' | 'files' | 'events' | 'teams';
+  title: string;
+  detail: string;
+  context: string;
+  href: string;
+  snippet: string | null;
+  stamp: string | null;
+  rank: number;
+};
+
 export type ChatMessage = {
   id: string;
   channelId: string;
@@ -322,4 +344,26 @@ export const api = {
       method: 'DELETE',
     }),
   downloadUrl: (fileId: string) => `/api/files/${encodeURIComponent(fileId)}/download`,
+
+  /* search */
+  /**
+   * Ranked search across people, messages, files, events and teams.
+   *
+   * `scope` is sent rather than filtered client-side, so the counts per scope and
+   * the results list come from the same ranking. Filtering after the fact would
+   * show a count of N next to a list of three, because the limit was already
+   * spent on the other scopes.
+   */
+  search: (params: { q: string; scope?: string; limit?: number }, signal?: AbortSignal) => {
+    const query = new URLSearchParams({ q: params.q });
+    if (params.scope) query.set('scope', params.scope);
+    if (params.limit) query.set('limit', String(params.limit));
+    return request<{
+      results: SearchResult[];
+      /** Every scope, including the zeroes, and not filtered by `scope`. */
+      counts: Record<SearchResult['scope'], number>;
+      query: string;
+      scope: string;
+    }>(`/search?${query}`, { signal });
+  },
 };

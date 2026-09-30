@@ -63,6 +63,11 @@ jobs:
       DATABASE_URL: postgresql://ncr_app:ncr_app_ci@127.0.0.1:5432/ncr_teams_ci?schema=public
       POSTGRES_SUPERUSER_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
 
+      # `migrate diff` needs an empty database to replay the migrations into. A
+      # different name from the one under test, because it drops and recreates its
+      # schema on every run.
+      SHADOW_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/ncr_teams_shadow?schema=public
+
     steps:
       - uses: actions/checkout@v5
 
@@ -86,6 +91,19 @@ jobs:
 
       - name: Verify the seeded data
         run: npm run db:verify
+
+      # The search indexes are the one part of the schema Prisma cannot represent,
+      # so `migrate dev` would helpfully write a migration that drops them. This
+      # asserts that the diff still contains nothing but the known, expected
+      # entries -- so a genuine unintended change cannot hide among them.
+      - name: Check for unexpected schema drift
+        run: npm run db:drift
+
+      # Asserts the GIN and trigram indexes are actually usable for the queries the
+      # search route issues. Without it, a migration that failed to create an index
+      # would pass every other check and search would return nothing at runtime.
+      - name: Verify the search indexes are used
+        run: npm run db:verify:plans
 
   api:
     name: Tests
