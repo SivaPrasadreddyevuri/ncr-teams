@@ -1,131 +1,165 @@
-# Backend — scaffold only
+# Backend
 
-**Status: specified, not built.** This folder contains no implementation. It
-exists so the contract the frontend will call is written down and reviewable
-rather than invented later.
+Express 5 + TypeScript API for NCR Teams. Deployed to Render; the database is
+Neon Postgres.
 
-## Planned stack
+**Status: foundation, auth and read paths built.** Messages, files, meetings,
+attendance, leave, search and the WebSocket are Phase 2b — the contract below is
+written down and unchanged, but those routes do not exist yet.
 
-| Concern | Choice | Why |
+## What exists
+
+| Area | Endpoints |
+| --- | --- |
+| Health | `GET /api/health`, `GET /api/health/ready` |
+| Auth | `POST /login`, `/verify-2fa`, `/logout`, `GET /me`, `POST /2fa/setup`, `/2fa/enable`, `/2fa/disable` |
+| People | `GET /api/users`, `GET /api/users/:id`, `PATCH /api/users/me` |
+| Teams | `GET /api/teams`, `GET /api/teams/:id` |
+| Channels | `GET /api/channels?teamId=`, `POST /api/channels/:id/read` |
+| Departments | `GET /api/departments` |
+| Activity | `GET /api/activity?limit=&before=` |
+
+`GET /api/activity` resolves each notification's target, so the feed is built
+from structured fields rather than the frozen prose the fixtures carried.
+
+## Stack, and where it changed
+
+| Concern | Choice | Note |
 | --- | --- | --- |
-| Runtime | Node 20+ | Same runtime as the frontend build |
-| Framework | Express 5 + TypeScript | Small, boring, easy to read in a review |
-| Validation | Zod | One schema shared with the frontend types |
-| Auth | Session cookie, httpOnly | Avoids storing a token in JS |
-| Database | Postgres via `pg` | See `../database` |
-| Realtime | `ws` WebSocket server | Needed for message delivery and presence |
-| Migrations | Plain versioned SQL | No ORM to learn or fight |
+| Runtime | Node 24 | Matches `.nvmrc` and the frontend build |
+| Framework | Express 5 | Async handler rejections are forwarded to the error middleware natively |
+| Database | **Prisma 6.19** | Was `pg` |
+| Migrations | **Prisma** | Was "plain versioned SQL" |
+| Validation | Zod | Unchanged |
+| Auth | Session cookie, httpOnly | Unchanged |
+| Passwords | Argon2id | 19 MiB, 2 iterations, parallelism 1 |
+| 2FA | TOTP, in-house on `node:crypto` | |
+| Realtime | `ws` | Phase 2b |
 
-## API contract
+**Why Prisma instead of `pg`.** The original note asked for no ORM. Two things
+changed the answer: Prisma's types catch a schema/API mismatch at compile time,
+and `migrate deploy` in CI fails on drift. Running `pg` alongside it would have
+meant two database layers and two sets of type definitions. `database/README.md`
+lists the full set of divergences.
 
-Every row maps to a value that `frontend/lib/data.ts` currently mocks, so the
-frontend can switch from fixtures to live data one screen at a time.
+The Prisma **client** is the only database access path. `backend/src/db.ts` holds
+one singleton — Prisma owns a connection pool, so a client per request would open
+a pool per request.
 
-Base path: `/api`. All responses are JSON. Authenticated routes expect the
-session cookie.
+## Two connection URLs
 
-### Auth
+`DATABASE_URL` is pooled, for request handling. `DIRECT_DATABASE_URL` is not, for
+migrations.
 
-| Method | Path | Notes |
-| --- | --- | --- |
-| `POST` | `/api/auth/login` | Email + password. Sets the session cookie. |
-| `POST` | `/api/auth/logout` | Clears the session. |
-| `POST` | `/api/auth/activate` | Completes an invited account. |
-| `POST` | `/api/auth/forgot-password` | Always returns 204, never leaks whether the account exists. |
-| `POST` | `/api/auth/verify-2fa` | TOTP check. Returns a challenge token. |
-| `GET` | `/api/auth/me` | Current user, or 401. |
+On Neon the pooled URL is the `-pooler` host and needs `?pgbouncer=true`, which
+tells Prisma the pooler is in transaction mode so it does not use prepared
+statements. Migrations must **not** use it: DDL and session state do not survive
+a transaction pooler, which is why the Prisma datasource declares `directUrl`
+separately. Locally both point at the same cluster, since there is no pooler.
 
-### People
+## Sessions
 
-| Method | Path | Notes |
-| --- | --- | --- |
-| `GET` | `/api/users` | Directory. Supports `?q=` and `?department=`. |
-| `GET` | `/api/users/:id` | Single person. |
-| `PATCH` | `/api/users/me` | Update own profile. |
+A 256-bit random token in an `httpOnly`, `SameSite=Lax` cookie. The database
+stores an HMAC of it keyed by `SESSION_PEPPER`, never the token, so a database
+leak does not yield usable cookies.
 
-### Teams and channels
+Rows, not stateless JWTs — a JWT cannot be revoked before it expires, so sign-out
+and "this account is compromised" would both be unimplementable. Signing in ends
+any previous session for that user; a single-session policy is the simplest thing
+that cannot leak, and the table is ready for the multi-session variant.
 
-| Method | Path | Notes |
-| --- | --- | --- |
-| `GET` | `/api/teams` | Teams the caller belongs to. |
-| `POST` | `/api/teams` | Create. Caller becomes `OWNER`. |
-| `GET` | `/api/teams/:id` | Detail with members. |
-| `POST` | `/api/teams/:id/join` | Idempotent. |
-| `POST` | `/api/teams/:id/leave` | Idempotent. |
-| `GET` | `/api/channels?teamId=` | Channels in a team. |
-| `POST` | `/api/channels` | Create. |
-| `POST` | `/api/channels/:id/join` | Idempotent. |
+`SESSION_PEPPER` has no default. A service that boots with a shared fallback is a
+service whose sessions are forgeable by anyone who has read the source, so a
+missing value is a boot failure. `render.yaml` has Render generate one and keep
+it stable — **copy it from the Render dashboard into `backend/.env`** for local
+work to produce cookies that verify in production.
 
-### Messages
+### CSRF
 
-| Method | Path | Notes |
-| --- | --- | --- |
-| `GET` | `/api/messages?channelId=&before=&limit=` | Cursor pagination, newest first. |
-| `POST` | `/api/messages` | Send. Broadcasts over the WebSocket. |
-| `POST` | `/api/messages/:id/reactions` | Toggle a reaction. |
-| `DELETE` | `/api/messages/:id` | Author only. |
+The session cookie is sent automatically on a cross-site request, so cookie auth
+alone is not enough. The `ncr_csrf` cookie is deliberately readable by JS; the
+frontend echoes it in an `x-csrf-token` header, and a cross-site attacker cannot
+read a cookie to set a matching header. Checked on every unsafe method, globally,
+so a new route is protected by default rather than by remembering.
 
-### Files
+`GET`/`HEAD`/`OPTIONS` are exempt — requiring a token on them would break the
+browser's preflight.
 
-| Method | Path | Notes |
-| --- | --- | --- |
-| `GET` | `/api/files?folderId=&team=` | Listing. |
-| `POST` | `/api/files` | Multipart upload. Streams to object storage. |
-| `DELETE` | `/api/files/:id` | Soft delete. |
-| `POST` | `/api/files/:id/star` | Toggle star. |
+## 2FA
 
-### Meetings, calls and calendar
+Two-step login. With 2FA enabled, `POST /login` does **not** create a session: it
+returns a short-lived challenge token, and only `POST /verify-2fa` with a valid
+code issues the session. Logging in first and attaching 2FA afterwards would mean
+a stolen password alone gets a real session.
 
-| Method | Path | Notes |
-| --- | --- | --- |
-| `GET` | `/api/meetings` | Upcoming and recent for the caller. |
-| `GET` | `/api/meetings/:id` | Detail plus participants. |
-| `POST` | `/api/meetings` | Schedule. Optionally creates a calendar event. |
-| `GET` | `/api/meetings/:id/messages` | In-meeting chat. |
-| `POST` | `/api/meetings/:id/messages` | In-meeting chat. |
-| `GET` | `/api/events?from=&to=` | Calendar events in a date range. |
-| `POST` | `/api/events` | Create. |
-| `PATCH` | `/api/events/:id/rsvp` | Accept / decline. |
+Challenges are rows in `Session`, marked by `PENDING_CHALLENGE_MARKER`, because
+they have the same lifecycle. `resolveSession` returns null for that marker, which
+is what stops a challenge token being usable as a session cookie. A challenge is
+deleted before its code is checked, so a code observed inside its 30-second
+window cannot be replayed.
 
-### Attendance, HR and activity
+Enrolment is two steps (`/2fa/setup` returns the secret, `/2fa/enable` proves a
+code). `twoFactorEnabled` is only set on the second, so a user who abandons
+enrolment is not locked out.
 
-| Method | Path | Notes |
-| --- | --- | --- |
-| `GET` | `/api/attendance?date=` | Board for a date. |
-| `GET` | `/api/attendance/me` | Caller history. |
-| `POST` | `/api/attendance/check-in` | Idempotent per day. |
-| `POST` | `/api/attendance/check-out` | Idempotent. |
-| `GET` | `/api/leave` | Leave requests. |
-| `POST` | `/api/leave` | Request. |
-| `PATCH` | `/api/leave/:id` | Approve or reject. |
-| `GET` | `/api/departments` | Department list. |
-| `GET` | `/api/activity` | Feed for the caller. |
+## Responses
 
-### Search
+Only `src/serialise.ts` writes JSON, and it converts `BigInt` to a string.
 
-| Method | Path | Notes |
-| --- | --- | --- |
-| `GET` | `/api/search?q=&scope=` | `scope` is one of `people`, `messages`, `files`, `events`, `teams`. Mirrors the ranking the frontend already implements client-side. |
+`File.sizeBytes` is `BigInt` and `JSON.stringify` throws on it. That failure is
+late and route-specific — the handler that built the response is correct and the
+object is inspectable — so it is caught centrally instead. A test asserts both
+that the raw serialisation throws and that the helper does not.
 
-## Realtime
+Errors are always `{ error: { code, message } }`, plus `details` on a validation
+failure. Never a stack trace, a Prisma message or a SQL fragment.
 
-One WebSocket endpoint at `/ws`, authenticated with the session cookie during
-the upgrade. Frames are `{ type, payload }`:
+## Configuration
 
-| `type` | Direction | Payload |
-| --- | --- | --- |
-| `message.created` | server → client | The stored message |
-| `message.updated` | server → client | Reactions, edits |
-| `message.deleted` | server → client | Message id |
-| `typing.start` / `typing.stop` | both | Channel id, user id |
-| `presence.changed` | server → client | User id, new status |
+`src/config.ts` validates at import and throws with every missing variable
+listed. Development-only CORS is configured but unset in production, and
+`TRUST_PROXY_HOPS` must be at least 1 when `NODE_ENV=production`, because the
+session cookie is only `Secure` over HTTPS.
 
-Presence is tracked in memory with a TTL, and is deliberately not persisted.
+See `.env.example`.
 
-## Conventions
+## Same-origin by proxying
 
-- Zod parses every request body and query string at the edge of the handler.
-- Handlers are thin: validate, call a query function, shape the response.
-- Database access lives in `src/queries/*`, mirroring the routes above.
-- No business logic in route files.
-- Errors return `{ error: { code, message } }`; never a stack trace.
+`frontend/next.config.ts` rewrites `/api/*` to this service, so from the browser
+both are the same origin: no cross-site cookie, no `SameSite=None` relaxation,
+and CORS is not involved in production at all. It stays configured for local
+development, where the two run on different ports.
+
+The rewrite is inert until `API_ORIGIN` is set, so a build without it still
+succeeds.
+
+## Tests
+
+```bash
+npm test --workspace backend
+```
+
+`node:test`, no framework — the repo has none, and the earlier frontend ad-hoc
+scripts were removed for exactly that reason.
+
+`pretest` creates `ncr_teams_test`, applies the real migrations and runs the real
+seed, so the suite exercises the shipped artefacts rather than a fixture built to
+match it. The test database is separate because tests truncate.
+
+The app is mounted on an ephemeral port and driven over HTTP, not called
+directly, because the things most likely to break — cookie flags, CSRF, status
+codes, BigInt serialisation — all live in the middleware and the response path.
+
+Signed-in users come from `test/fixtures.ts`, which sets a password the seed
+deliberately leaves null. Argon2 at 19 MiB is slow enough that the suite shares
+one hash across fixtures; salting means each stored value is still distinct.
+
+## Not yet built
+
+Everything else in the contract: messages, reactions, file upload, meetings,
+calendar, attendance, leave, search, and the `/ws` endpoint with presence.
+
+File storage is the open design question. The plan is server disk, but **Render's
+free tier filesystem is ephemeral** — uploads are lost on every deploy and on
+instance restart. Cloudflare R2 is the natural fit and the account is already
+needed for TURN. This is a 2b decision, not a 2a one.

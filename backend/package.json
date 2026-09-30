@@ -3,11 +3,31 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "API service for NCR Teams. Scaffold only - no implementation yet. See README.md.",
+  "description": "API service for NCR Teams.",
   "scripts": {
-    "dev": "echo \"No implementation yet - see backend/README.md\" && exit 1",
-    "build": "echo \"No implementation yet - see backend/README.md\" && exit 1",
-    "start": "echo \"No implementation yet - see backend/README.md\" && exit 1",
-    "typecheck": "echo \"No sources yet - see backend/README.md\""
+    "dev": "node --import tsx --watch src/server.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit",
+    "pretest": "node --import tsx test/prepare-db.ts",
+    "test": "node --import tsx --test --test-concurrency=1 \"test/*.test.ts\"",
+    "user:password": "node --import tsx scripts/set-password.ts"
+  },
+  "dependencies": {
+    "@node-rs/argon2": "^2.0.2",
+    "@prisma/client": "6.19.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^5.0.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.8",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.5",
+    "tsx": "4.23.15",
+    "typescript": "^5.7.3"
   }
 }

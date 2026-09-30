@@ -1,0 +1,57 @@
+# Render blueprint for the API service.
+#
+# The database is NOT declared here. It is a Neon Postgres, created separately,
+# and this service only needs its connection strings -- so nothing in this file
+# can create or destroy a database.
+
+services:
+  - type: web
+    name: ncr-teams-api
+    runtime: node
+    plan: free
+    region: singapore
+
+    # Build from the repository root, because this is an npm workspace and the
+    # Prisma client has to be generated once for the whole tree.
+    #
+    # `npm ci` at the root installs every workspace, so the API's dependencies
+    # are present even though the Dockerfile equivalent runs in the root
+    # directory.
+    buildCommand: npm ci && npm run db:generate
+    startCommand: npm run start --workspace backend
+
+    healthCheckPath: /api/health
+    # A cold start on the free tier compiles nothing (TypeScript is built ahead
+    # of time), so this is generous rather than tuned.
+    autoDeploy: true
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # Pooled connection for request handling. On Neon this is the `-pooler`
+      # host. `pgbouncer=true` tells Prisma the pooler is in transaction mode,
+      # which disables prepared statements -- without it, queries fail on a
+      # pooled endpoint.
+      - key: DATABASE_URL
+        sync: false
+
+      # Unpooled, for migrations. A transaction pooler cannot run DDL.
+      - key: DIRECT_DATABASE_URL
+        sync: false
+
+      # HMAC key for session tokens. `generateValue: true` makes Render create a
+      # random one and keep it stable across deploys -- which is required, since
+      # changing it would sign out every user.
+      #
+      # It is NOT committed to the repository, so the developer who first deploys
+      # must copy the value from the Render dashboard into backend/.env, or a
+      # local session cookie will not verify against production.
+      - key: SESSION_PEPPER
+        generateValue: true
+
+      # Render terminates TLS and forwards one hop. Without this, Express reads
+      # the proxy's address as the client's, and the session cookie cannot be
+      # Secure.
+      - key: TRUST_PROXY_HOPS
+        value: "1"

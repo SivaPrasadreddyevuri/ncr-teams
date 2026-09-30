@@ -19,7 +19,17 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  // Pooled connection for request handling. On Neon this is the `-pooler` host
+  // with `?pgbouncer=true`, so many concurrent requests share few connections.
+  url = env("DATABASE_URL")
+
+  // Unpooled connection, used by `migrate` and by the test harness.
+  //
+  // These have to be different. Migrations issue DDL and read session state,
+  // and a transaction pooler multiplexes over one connection, so DDL and
+  // session-scoped commands fail or behave unpredictably through it. Prisma
+  // separates the two precisely so migrations never run over the pooled URL.
+  directUrl = env("DIRECT_DATABASE_URL")
 }
 
 /* ------------------------------------------------------------------ */

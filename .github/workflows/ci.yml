@@ -86,3 +86,45 @@ jobs:
 
       - name: Verify the seeded data
         run: npm run db:verify
+
+  api:
+    name: API tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # setup-env.ts points the suite at ncr_teams_test on this server, creating
+      # and seeding it before the run. Both URLs are the same here because there
+      # is no pooler in CI; the split only matters on a real deployment.
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/ncr_teams_test?schema=public
+      DIRECT_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/ncr_teams_test?schema=public
+      SESSION_PEPPER: ci-pepper-fixed-value-at-least-32-chars
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      # `pretest` creates the test database, applies the real migrations, and
+      # seeds it, so the suite runs against the same artefacts a deploy would.
+      - name: Test
+        run: npm test
