@@ -88,9 +88,13 @@ jobs:
         run: npm run db:verify
 
   api:
-    name: API tests
+    name: Tests
     runs-on: ubuntu-latest
 
+    # Both suites run here rather than splitting the pure frontend tests into
+    # their own job. The frontend ones need no database and would be wasted
+    # spinning one up, but they are eleven assertions against a single function,
+    # and a second job costs more in workflow time than it saves.
     services:
       postgres:
         image: postgres:17
@@ -124,7 +128,8 @@ jobs:
 
       - run: npm ci
 
-      # `pretest` creates the test database, applies the real migrations, and
-      # seeds it, so the suite runs against the same artefacts a deploy would.
+      # The backend's `pretest` creates the test database, applies the real
+      # migrations, and seeds it, so that suite runs against the same artefacts a
+      # deploy would. The frontend suite needs none of that and runs after it.
       - name: Test
         run: npm test

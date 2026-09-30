@@ -6,7 +6,9 @@
  * **The URL and the token.** The socket is cross-origin (the API is proxied, an
  * upgrade is not), so it needs a short-lived token from `GET /api/auth/ws-token`
  * and the backend's own host. A token is only good for 60 seconds, so it is
- * fetched per connection rather than cached.
+ * fetched per connection rather than cached. The host comes from
+ * `NEXT_PUBLIC_WS_URL`, which cannot be derived in the browser -- see
+ * `resolveSocketUrl` for why.
  *
  * **Reconnection.** A mobile browser, a sleeping laptop or a Render instance
  * restarting will drop the socket, and without recovery the chat silently stops
@@ -31,6 +33,78 @@ export type RealtimeStatus = 'connecting' | 'open' | 'reconnecting' | 'closed';
 
 const MAX_BACKOFF_MS = 30_000;
 const BASE_BACKOFF_MS = 500;
+const WS_PATH = '/ws';
+
+/**
+ * Resolves the socket URL, and says so when the configuration is wrong.
+ *
+ * The awkward part of this deployment is that REST and the WebSocket reach the
+ * API by different routes. REST goes through the Next rewrite in
+ * `next.config.ts`, so the browser only ever talks to the frontend's own origin.
+ * A rewrite cannot proxy a WebSocket upgrade, so the socket has to be told the
+ * backend's host directly -- there is no way to derive it in the browser, since
+ * `API_ORIGIN` is deliberately not a `NEXT_PUBLIC_` variable and is never sent
+ * to the client.
+ *
+ * The old fallback guessed `wss://<page host>/ws`, which in production is
+ * Vercel. That host will never complete the handshake, so chat silently stopped
+ * receiving while looking connected-or-busy in the console. A guess that is
+ * reliably wrong is worse than a loud failure, so the guess now warns.
+ *
+ * The scheme and path are derived rather than demanded, because
+ * `https://ncr-teams-api.onrender.com` is a very easy thing to paste and
+ * `new WebSocket` would throw on it. Only ws/wss/http/https are accepted though:
+ * anything else is a mistake rather than an intention, and rewriting an unknown
+ * scheme into `ws://` would hide it.
+ *
+ * Exported for the tests in test/realtime-url.test.ts. The URL is the one piece
+ * of this module that is a pure function of its input, and it is also the piece
+ * whose failure is invisible -- a wrong host means a socket that never opens.
+ */
+export function resolveSocketUrl(
+  configured: string | undefined,
+  pageOrigin: { protocol: string; host: string },
+  isProduction: boolean,
+): string {
+  if (configured) {
+    let url: URL;
+    try {
+      url = new URL(configured);
+    } catch {
+      throw new Error(
+        `NEXT_PUBLIC_WS_URL is not a valid URL: ${JSON.stringify(configured)}. ` +
+          'Use a full ws:// or wss:// URL, for example wss://ncr-teams-api.onrender.com/ws',
+      );
+    }
+
+    if (url.protocol === 'http:' || url.protocol === 'https:') {
+      url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    } else if (url.protocol !== 'ws:' && url.protocol !== 'wss:') {
+      throw new Error(
+        `NEXT_PUBLIC_WS_URL must be a ws:// or wss:// URL, got ${url.protocol}// in ` +
+          `${JSON.stringify(configured)}.`,
+      );
+    }
+
+    // A bare origin is the common paste, so the path is added for it. Setting
+    // `pathname` rather than returning `url.href` is also what normalises the
+    // case where the paste had no trailing slash.
+    if (url.pathname === '/' || url.pathname === '') url.pathname = WS_PATH;
+
+    return url.toString();
+  }
+
+  if (isProduction) {
+    console.warn(
+      `[realtime] NEXT_PUBLIC_WS_URL is not set, so the socket is being opened against ` +
+        `${pageOrigin.protocol}//${pageOrigin.host}${WS_PATH} -- the frontend's own host. ` +
+        'The Next rewrite proxies /api/* but cannot proxy a WebSocket upgrade, so this ' +
+        'will not connect. Set NEXT_PUBLIC_WS_URL to the API\'s public wss:// URL.',
+    );
+  }
+
+  return `${pageOrigin.protocol === 'https:' ? 'wss' : 'ws'}://${pageOrigin.host}${WS_PATH}`;
+}
 
 export class RealtimeClient {
   private socket: WebSocket | null = null;
@@ -45,9 +119,9 @@ export class RealtimeClient {
   /**
    * Connects, fetching a token first.
    *
-   * The socket host is derived from the page origin in production. In local
-   * development the API runs on its own port and the page is on another, so
-   * `NEXT_PUBLIC_WS_URL` points at it directly.
+   * The socket host comes from `NEXT_PUBLIC_WS_URL` when it is set. The fallback
+   * is the page's own origin, which is right for a single-host deployment and
+   * wrong for the split one -- see `resolveSocketUrl`.
    */
   async connect(): Promise<void> {
     this.closedByUs = false;
@@ -63,11 +137,29 @@ export class RealtimeClient {
       return;
     }
 
-    const base =
-      process.env.NEXT_PUBLIC_WS_URL ??
-      `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
+    let base: string;
+    try {
+      base = resolveSocketUrl(
+        process.env.NEXT_PUBLIC_WS_URL,
+        location,
+        process.env.NODE_ENV === 'production',
+      );
+    } catch (error) {
+      // A malformed variable is a configuration mistake, not a transient
+      // failure, so retrying cannot help. Failing here rather than letting
+      // `new WebSocket` throw keeps the failure legible.
+      this.emitStatus('closed');
+      console.error(error instanceof Error ? error.message : error);
+      return;
+    }
 
-    this.socket = new WebSocket(`${base}?token=${encodeURIComponent(this.token)}`);
+    // Appended with the URL API rather than by string concatenation, because a
+    // configured URL may already carry a query string and `?token=` would then
+    // produce a second `?` and send the whole thing as one parameter name. The
+    // token is also encoded by searchParams, which `new WebSocket` would not do.
+    const url = new URL(base);
+    url.searchParams.set('token', this.token);
+    this.socket = new WebSocket(url.toString());
 
     this.socket.onopen = () => {
       this.attempt = 0;

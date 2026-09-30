@@ -17,13 +17,32 @@ services:
     # `npm ci` at the root installs every workspace, so the API's dependencies
     # are present even though the Dockerfile equivalent runs in the root
     # directory.
-    buildCommand: npm ci && npm run db:generate
+    #
+    # The backend build is NOT optional. `start` runs `node dist/server.js`, and
+    # dist/ only exists because `tsc -p tsconfig.build.json` writes it. Without
+    # this step the container starts, `npm run start` cannot find dist/server.js,
+    # and the service fails its first health check. The frontend build is
+    # deliberately absent: it is deployed separately to Vercel, and building it
+    # here would only cost time.
+    buildCommand: npm ci && npm run db:generate && npm run build --workspace backend
     startCommand: npm run start --workspace backend
 
     healthCheckPath: /api/health
     # A cold start on the free tier compiles nothing (TypeScript is built ahead
     # of time), so this is generous rather than tuned.
     autoDeploy: true
+
+    # Migrations are NOT run by this blueprint. Render's preDeployCommand is a
+    # paid-plan feature, so on `plan: free` the schema has to be applied by hand:
+    #
+    #   DATABASE_URL=<direct neon url> DIRECT_DATABASE_URL=<direct neon url> \
+    #     npm run db:deploy
+    #
+    # Run it from a clone with the two Neon URLs exported. It is deliberately not
+    # part of buildCommand, because a build runs on every push including from
+    # pull requests, and a build should not mutate a database. It is not part of
+    # startCommand either, because a free-tier instance restarts often and
+    # several of them would race to migrate the same schema.
 
     envVars:
       - key: NODE_ENV
