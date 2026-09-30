@@ -11,12 +11,18 @@ import { createApp } from './app.js';
 import { config } from './config.js';
 import { prisma } from './db.js';
 import { pruneExpiredSessions } from './auth/session-store.js';
+import { attachRealtime } from './realtime/server.js';
 
 const app = createApp();
 
 const server = app.listen(config.PORT, () => {
   console.log(`[server] listening on http://127.0.0.1:${config.PORT} (${config.NODE_ENV})`);
 });
+
+// Attached to the same server rather than a second listener: one process, one
+// port and one origin to allow, which matters because the free-tier instance
+// sleeps when idle.
+const realtime = attachRealtime(server);
 
 /**
  * Expired sessions are pruned hourly.
@@ -63,7 +69,7 @@ function shutdown(signal: string) {
   clearInterval(pruneTimer);
 
   server.close(() => {
-    void prisma.$disconnect().finally(() => {
+    void realtime.close().then(() => prisma.$disconnect()).finally(() => {
       clearTimeout(forceExit);
       process.exit(0);
     });

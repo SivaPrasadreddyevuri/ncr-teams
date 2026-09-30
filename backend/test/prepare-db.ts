@@ -33,14 +33,30 @@ const seedScript = `${databaseDir}/prisma/seed.ts`;
  * looks like a migration bug.
  */
 async function ensureDatabase() {
-  // Connect to the maintenance database: CREATE DATABASE cannot run inside the
-  // database it would create.
   const target = new URL(testUrl);
   const name = target.pathname.replace(/^\//, '');
-  target.pathname = '/postgres';
 
-  const client = new Client({ connectionString: target.toString() });
-  await client.connect();
+  // CREATE DATABASE cannot run inside the database it would create, so the
+  // maintenance database is used. It also always exists, which makes it the
+  // right place to check reachability before anything else.
+  const maintenance = new URL(target.toString());
+  maintenance.pathname = '/postgres';
+
+  let client: Client;
+  try {
+    client = new Client({ connectionString: maintenance.toString() });
+    await client.connect();
+  } catch (error) {
+    console.error(
+      '[test-db] cannot reach the database.\n' +
+        `  host: ${maintenance.host}\n` +
+        `  ${error instanceof Error ? error.message : String(error)}\n\n` +
+        '  If it is the repository-local cluster, start it first:\n' +
+        '    .\\scripts\\db-start.ps1\n',
+    );
+    process.exit(1);
+  }
+
   try {
     const existing = await client.query('SELECT 1 FROM pg_database WHERE datname = $1', [name]);
     if (existing.rowCount === 0) {

@@ -75,16 +75,66 @@ That is a deliberate simplification for a showcase. Cloudflare R2 is the fix if
 this ever needs to outlive a deploy, and the account is already needed for TURN;
 it was skipped because it buys nothing a viewer of the demo would notice.
 
-## Realtime bus
+## Realtime
 
-`src/realtime/bus.ts` is a typed in-process emitter. The message and file routes
-publish to it; Phase 2c subscribes a WebSocket broadcaster to the same events.
-That keeps `ws` out of the request path, so the broadcast contract is testable
-without a listening server.
+### The WebSocket (`/ws`)
 
-Events are in-process only: a `message.created` on one instance does not reach a
-browser on another. Correct for a single instance, and a Redis pub/sub fan-out at
-this exact seam is the change if it is ever more than one.
+Attached to the same HTTP server as the API. One process, one port, one origin
+to allow — which matters because the free-tier instance sleeps when idle, and a
+second long-polling service would keep it awake for no benefit.
+
+Client to server: `subscribe`, `typing.start`, `typing.stop`, `ping`.
+Server to client: the frames the event bus publishes, plus `ready`, `subscribed`,
+`presence.changed`, `pong` and `error`. Every frame is `{ type, payload }`, so a
+client switches on one field.
+
+**Message delivery is not the socket's job.** A client POSTs to the REST API,
+which validates, authorises, persists and publishes. The socket only relays the
+event. A socket that could write would need the same validation, the same
+authorisation and the same audit path as the HTTP route, and there is no version
+of that worth maintaining twice.
+
+**The publisher's own socket is skipped** for `message.created`, because that
+client already has the message from the HTTP response it just received.
+
+**Subscription is not a claim of membership.** The `subscribe` frame is checked
+against team membership before a socket is granted a channel, so an authenticated
+socket cannot name an arbitrary channel id and start receiving its traffic.
+
+### Connection tokens
+
+`GET /api/auth/ws-token` returns a token for 60 seconds.
+
+It exists because the session cookie cannot do this job. The cookie is
+`SameSite=Lax`, and a WebSocket to another origin is a cross-site request, so the
+browser would not attach it. The alternative was `SameSite=None; Secure`, which
+reopens CSRF on every REST route in exchange for solving a problem a token solves
+better.
+
+The token is an HMAC over `userId.expiry`, keyed by the same `SESSION_PEPPER`, so
+it cannot be used against the REST API even if it leaks, and the user id cannot
+be edited without invalidating the signature. The REST API is also not reachable
+with it — the two use different message prefixes, so neither is replayable as
+the other.
+
+It travels in the query string, which means access logs. For a 60-second,
+user-scoped HMAC that is an acceptable trade; `Sec-WebSocket-Protocol` is the
+route to take if that ever changes.
+
+### Presence
+
+In-memory, derived from open connections, deliberately not persisted. A
+`Person.online` column would be wrong the moment someone closed a tab and nothing
+would ever write the `false`.
+
+A user may hold several connections — two tabs, or a phone and a laptop — so
+presence counts connections, not identities, and a user goes offline only when
+their last one closes. A 45-second TTL, refreshed by the socket heartbeat, means
+someone who force-quits their browser does not linger as online.
+
+In-process, so it describes one instance. Two instances would report a user
+connected to each as two people; the fix is the same Redis fan-out the event bus
+documents.
 
 ## Stack, and where it changed
 
@@ -233,7 +283,7 @@ npm test --workspace backend
 ```
 
 112 tests: auth and session behaviour, the read endpoints, messages, files,
-storage containment, and an encoding guard.
+storage containment, the WebSocket, and an encoding guard.
 
 `node:test`, no framework — the repo has none, and the earlier frontend ad-hoc
 scripts were removed for exactly that reason.
@@ -261,6 +311,7 @@ held the wrong bytes. There is no linter here to catch it, so a test does.
 
 ## Not yet built
 
-Meetings, calendar, attendance, leave, HR actions, search, and the `/ws`
-endpoint with presence. Those pages still render from the frontend fixtures, which
-already look correct, so they are deliberately not wired yet.
+Meetings, calendar, attendance, leave, HR actions and search. Those pages still
+render from the frontend fixtures, which already look correct, so they are
+deliberately not wired yet. WebRTC — peer connections, mute, screen share — is
+front-end work and is not in this folder.

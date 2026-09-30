@@ -10,7 +10,9 @@
 
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { WebSocket } from 'ws';
 import { createApp } from '../src/app.js';
+import { attachRealtime } from '../src/realtime/server.js';
 import { prisma } from '../src/db.js';
 
 /** One HTTP client that keeps cookies, the way a browser would. */
@@ -158,6 +160,20 @@ export type Harness = {
   baseUrl: string;
   /** A fresh client with no cookies. */
   client: () => Client;
+  /**
+   * A signed-in client for `email`, memoised per user.
+   *
+   * Memoised because the service enforces a single session per user: signing in
+   * again revokes the previous session. Without this, a test that signs in once
+   * for an HTTP call and again to open a socket silently invalidates its own HTTP
+   * client, and the failure shows up as a 401 several steps later with nothing
+   * pointing at the cause.
+   */
+  signIn: (email: string, password: string) => Promise<Client>;
+  /** The public WebSocket URL, without a token. */
+  wsUrl: string;
+  /** WebSocket connections currently open, for assertions. */
+  wsConnectionCount: () => number;
   close: () => Promise<void>;
 };
 
@@ -172,10 +188,26 @@ export async function startHarness(): Promise<Harness> {
   const { port } = server.address() as AddressInfo;
   const baseUrl = `http://127.0.0.1:${port}`;
 
+  // The WebSocket is attached to the same server here as in server.ts, so the
+  // handshake path under test is the real one rather than a stub.
+  const realtime = attachRealtime(server);
+
+  const signedIn = new Map<string, Client>();
+
   return {
     baseUrl,
+    wsUrl: `ws://127.0.0.1:${port}/ws`,
+    wsConnectionCount: realtime.connectionCount,
     client: () => new Client(baseUrl),
+    signIn: async (email, password) => {
+      const existing = signedIn.get(email);
+      if (existing) return existing;
+      const created = await signInAt(baseUrl, email, password);
+      signedIn.set(email, created);
+      return created;
+    },
     close: async () => {
+      await realtime.close();
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
       });
@@ -184,24 +216,169 @@ export async function startHarness(): Promise<Harness> {
   };
 }
 
-/** Signs in and returns a client holding the session. */
+/** Signs in against `baseUrl` and returns a client holding the session. */
+export async function signInAt(baseUrl: string, email: string, password: string): Promise<Client> {
+  const client = new Client(baseUrl);
+  const response = await client.post('/api/auth/login', { email, password });
+  if (response.status !== 200) {
+    throw new Error(`login failed for ${email}: ${response.status} ${await response.text()}`);
+  }
+  return client;
+}
+
+/** As `signInAt`, against an existing harness. */
 export async function signedInClient(
   harness: Harness,
   email: string,
   password: string,
 ): Promise<Client> {
-  const client = harness.client();
-  const response = await client.post('/api/auth/login', { email, password });
-  if (response.status !== 200) {
-    throw new Error(
-      `login failed for ${email}: ${response.status} ${await response.text()}`,
-    );
-  }
-  return client;
+  return signInAt(harness.baseUrl, email, password);
 }
 
 /** Credentials the suite signs in with. See test/fixtures. */
 export const TEST_PASSWORD = 'integration-test-password';
+
+/* ------------------------------------------------------------------ */
+/* WebSocket                                                           */
+/* ------------------------------------------------------------------ */
+
+export type WsFrame = { type: string; payload: Record<string, unknown> };
+
+/**
+ * A WebSocket client that records every frame it receives.
+ *
+ * Frames are buffered rather than awaited one at a time, because the interesting
+ * assertions are about what a *second* client receives, and a test that pulls
+ * frames off a queue in order would couple itself to delivery timing.
+ */
+export class WsClient {
+  private readonly received: WsFrame[] = [];
+  private readonly socket: WebSocket;
+  private readonly waiters: Array<{
+    match: (frame: WsFrame) => boolean;
+    resolve: (frame: WsFrame) => void;
+    reject: (error: Error) => void;
+    timer: NodeJS.Timeout;
+  }> = [];
+
+  private constructor(socket: WebSocket) {
+    this.socket = socket;
+    socket.on('message', (raw) => {
+      let frame: WsFrame;
+      try {
+        frame = JSON.parse(raw.toString()) as WsFrame;
+      } catch {
+        return;
+      }
+      this.received.push(frame);
+
+      // Resolve any waiter this frame satisfies, oldest first.
+      for (let i = 0; i < this.waiters.length; i += 1) {
+        const waiter = this.waiters[i]!;
+        if (waiter.match(frame)) {
+          clearTimeout(waiter.timer);
+          this.waiters.splice(i, 1);
+          waiter.resolve(frame);
+          return;
+        }
+      }
+    });
+  }
+
+  /** Opens a socket, failing rather than hanging if the handshake is rejected. */
+  static connect(url: string, options: { timeoutMs?: number } = {}): Promise<WsClient> {
+    return new Promise((resolve, reject) => {
+      const socket = new WebSocket(url);
+      const timer = setTimeout(() => {
+        socket.terminate();
+        reject(new Error(`WebSocket did not open within ${options.timeoutMs ?? 5000}ms`));
+      }, options.timeoutMs ?? 5000);
+
+      socket.once('open', () => {
+        clearTimeout(timer);
+        resolve(new WsClient(socket));
+      });
+      socket.once('error', (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+      socket.once('unexpected-response', (_request, response) => {
+        clearTimeout(timer);
+        reject(new Error(`handshake rejected with ${response.statusCode}`));
+      });
+    });
+  }
+
+  send(type: string, payload: unknown = {}): void {
+    this.socket.send(JSON.stringify({ type, payload }));
+  }
+
+  /** Sends bytes verbatim, for the malformed-frame cases. */
+  sendRaw(raw: string): void {
+    this.socket.send(raw);
+  }
+
+  /** The first frame of `type` ever received, or undefined. */
+  first(type: string): WsFrame | undefined {
+    return this.received.find((frame) => frame.type === type);
+  }
+
+  all(type: string): WsFrame[] {
+    return this.received.filter((frame) => frame.type === type);
+  }
+
+  get frames(): WsFrame[] {
+    return this.received;
+  }
+
+  /**
+   * Waits for a frame matching `match`.
+   *
+   * Checks what has already arrived before waiting, so a test that asserts on a
+   * frame which landed during setup does not deadlock against its own buffer.
+   */
+  waitFor(match: (frame: WsFrame) => boolean, timeoutMs = 5000): Promise<WsFrame> {
+    const already = this.received.find(match);
+    if (already) return Promise.resolve(already);
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const index = this.waiters.findIndex((w) => w.timer === timer);
+        if (index !== -1) this.waiters.splice(index, 1);
+        reject(
+          new Error(
+            `timed out after ${timeoutMs}ms waiting for a frame. Received: ${JSON.stringify(
+              this.received.map((f) => f.type),
+            )}`,
+          ),
+        );
+      }, timeoutMs);
+      this.waiters.push({ match, resolve, reject, timer });
+    });
+  }
+
+  waitForType(type: string, timeoutMs = 5000): Promise<WsFrame> {
+    return this.waitFor((frame) => frame.type === type, timeoutMs);
+  }
+
+  /** Resolves false if no frame of `type` arrives within the window. */
+  async seesNo(type: string, windowMs = 300): Promise<boolean> {
+    try {
+      await this.waitForType(type, windowMs);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  close(): void {
+    this.socket.close();
+  }
+
+  terminate(): void {
+    this.socket.terminate();
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /* Response shapes                                                      */
