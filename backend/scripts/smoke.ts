@@ -399,6 +399,38 @@ if (fileId) {
   check('an unknown punch action is rejected', badPunch.status === 400, `got ${badPunch.status}`);
 }
 
+/* 8f. Message edit and the channel file filter.
+
+   Both are used by the chat screen, and both are the kind of thing that is easy to
+   leave wired on the client and broken on the server. */
+{
+  const posted = await call('POST', '/api/messages', { channelId: 'c1', body: 'smoke edit target' });
+  const target = (posted.json as { message?: { id: string; editedAt: string | null } }).message;
+  check('a message can be posted to edit', posted.status === 201 && Boolean(target?.id), `got ${posted.status}`);
+
+  if (target?.id) {
+    const edited = await call('PATCH', `/api/messages/${target.id}`, { body: 'smoke edited' });
+    const body = edited.json as { message?: { body: string; editedAt: string | null } };
+    check('PATCH returns 200', edited.status === 200, `got ${edited.status}`);
+    check('the edit stored the new body', body.message?.body === 'smoke edited', `got ${body.message?.body}`);
+    check(
+      'the edit stamped editedAt',
+      typeof body.message?.editedAt === 'string',
+      `editedAt: ${body.message?.editedAt}`,
+    );
+
+    const blank = await call('PATCH', `/api/messages/${target.id}`, { body: '   ' });
+    check('an empty edit is rejected', blank.status === 400, `got ${blank.status}`);
+
+    await call('DELETE', `/api/messages/${target.id}`);
+  }
+
+  const channelFiles = await call('GET', '/api/files?channelId=c1');
+  check('files can be filtered by channel', channelFiles.status === 200, `got ${channelFiles.status}`);
+  const badFilter = await call('GET', `/api/files?channelId=${'x'.repeat(200)}`);
+  check('a malformed channelId is rejected', badFilter.status === 400, `got ${badFilter.status}`);
+}
+
 /* 9. logout invalidates the session */
 r = await call('POST', '/api/auth/logout');
 check('logout is 204', r.status === 204, `got ${r.status}`);

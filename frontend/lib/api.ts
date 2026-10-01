@@ -351,10 +351,17 @@ export const api = {
     if (before) query.set('before', before);
     return request<{ messages: ChatMessage[]; nextCursor: string | null }>(`/messages?${query}`);
   },
-  sendMessage: (channelId: string, body: string, attachmentIds: string[] = []) =>
+  /**
+   * Send a message.
+   *
+   * `parentId` makes it a reply. The server validates that the parent is in the
+   * same channel, because a reply spanning two conversations is a thread that
+   * belongs to neither.
+   */
+  sendMessage: (channelId: string, body: string, attachmentIds: string[] = [], parentId?: string) =>
     request<{ message: ChatMessage }>('/messages', {
       method: 'POST',
-      body: { channelId, body, attachmentIds },
+      body: { channelId, body, attachmentIds, ...(parentId ? { parentId } : {}) },
     }),
   toggleReaction: (messageId: string, emoji: string) =>
     request<{ message: ChatMessage }>(`/messages/${encodeURIComponent(messageId)}/reactions`, {
@@ -362,11 +369,32 @@ export const api = {
       body: { emoji },
     }),
 
+  /**
+   * Edit a message.
+   *
+   * Author-only and server-trimmed, so the trimmed body comes back in the
+   * response rather than being recomputed here -- the server's copy is the one that
+   * was stored.
+   */
+  editMessage: (messageId: string, body: string) =>
+    request<{ message: ChatMessage }>(`/messages/${encodeURIComponent(messageId)}`, {
+      method: 'PATCH',
+      body: { body },
+    }),
+
+  /** Soft delete. The row stays as a tombstone so replies keep their position. */
+  deleteMessage: (messageId: string) =>
+    request<{ message: ChatMessage }>(`/messages/${encodeURIComponent(messageId)}`, {
+      method: 'DELETE',
+    }),
+
   /* files */
-  files: (params: { folderId?: string; team?: string } = {}) => {
+  files: (params: { folderId?: string; team?: string; channelId?: string } = {}) => {
     const query = new URLSearchParams();
     if (params.folderId) query.set('folderId', params.folderId);
     if (params.team) query.set('team', params.team);
+    // Added for the chat sidebar's Files tab, which asks "what was shared here".
+    if (params.channelId) query.set('channelId', params.channelId);
     const suffix = query.toString();
     return request<{ files: FileRow[] }>(`/files${suffix ? `?${suffix}` : ''}`);
   },

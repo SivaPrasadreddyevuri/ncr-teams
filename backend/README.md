@@ -369,6 +369,33 @@ The tests are mostly about visibility and windows, since that is where a calenda
 fails quietly — a listing one event too long is not an obvious bug on the screen
 that renders it.
 
+## Messages
+
+`GET|POST /api/messages`, `PATCH|DELETE /api/messages/:id`,
+`POST /api/messages/:id/reactions`.
+
+Cursor pagination rather than `OFFSET`. `OFFSET` re-counts from the start on every
+page, so a message arriving mid-scroll shifts the window and the reader sees a
+duplicate at one end and a gap at the other. The cursor is the `(createdAt, id)`
+pair the last row of the previous page ended on, base64url-encoded so a client
+cannot construct an invalid one.
+
+**Edit is author-only and has no history.** `editedAt` and the `message.updated`
+broadcast existed with nothing writing to them; the endpoint is the missing half.
+The body is overwritten and a timestamp is all that survives — an edit history needs
+its own table and a view, and a half-built one is worse than an honest "edited".
+
+**Replies render inline, not in a panel.** `parentId` is accepted and validated to
+be in the same channel, and the DTO carries `parentId` plus `parentAuthor` so
+"Replying to Sarah" needs no per-reply lookup. A soft-deleted parent keeps its
+attribution: the reply genuinely was in reply to something that person wrote, which
+is what Discord and Slack do too.
+
+**A tombstone is not a removal.** Delete blanks the body and keeps the row, so
+thread position, timestamps and replies stay coherent. `GET /api/channels` excludes
+deleted messages from both `lastMessage` and `unread` — a tombstone is not something
+anyone unread, and counting it left a badge that reading could never clear.
+
 ## Search
 
 One endpoint, five entity types, ranked in the database. `src/routes/search.ts`.

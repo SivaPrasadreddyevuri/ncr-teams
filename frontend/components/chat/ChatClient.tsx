@@ -1,12 +1,37 @@
 'use client';
 
+/**
+ * Chat.
+ *
+ * Owns the live state and the socket; the rendering of a single message, of the
+ * composer and of the typing indicator are separate components, because this file
+ * would otherwise be over a thousand lines and every change to the thread would
+ * touch the code that owns the connection.
+ *
+ * ## What is real and what is not
+ *
+ * Everything on screen is live or it says it is not. There is no simulated
+ * presence, no typing animation that is not caused by an actual keystroke, and no
+ * unread badge computed in the browser. A demo that faked those would look better
+ * for two minutes and fall over the first time somebody opened two tabs -- and it
+ * is very hard to walk back once it is in, because everything downstream starts
+ * assuming it is real.
+ *
+ * The one place the fixtures still appear is before the first response arrives, and
+ * `composer-status` says so in as many words.
+ */
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Paperclip, Send, Hash, MessageSquare, X, ChevronLeft } from 'lucide-react';
+import { Hash, X, ChevronLeft } from 'lucide-react';
 import { PersonAvatar } from '@/components/profile/PersonAvatar';
 import { useActivePerson } from '@/components/profile/ProfileProvider';
-import { relativeTime } from '@/lib/format';
-import { api, ApiError, type ChatMessage as LiveMessage } from '@/lib/api';
+import { MessageRow } from './MessageRow';
+import { Composer } from './Composer';
+import { TypingIndicator } from './TypingIndicator';
+import type { DisplayMessage, PendingAttachment, TypingPeer } from './types';
+import { api, ApiError, type ChatMessage as LiveMessage, type FileRow } from '@/lib/api';
 import { RealtimeClient, type RealtimeStatus } from '@/lib/realtime';
+import { relativeTime, formatBytes } from '@/lib/format';
 import type { Channel, ChatMessage, Person } from '@/lib/data';
 
 type Thread = 'chat' | 'files' | 'meetings';
@@ -17,18 +42,22 @@ const THREADS: Array<{ id: Thread; label: string }> = [
   { id: 'meetings', label: 'Meetings' },
 ];
 
+/** How long a peer's typing indicator survives without a fresh keystroke from them. */
+const TYPING_TTL_MS = 3000;
+
+/** How long after the last keystroke before we tell the server we stopped. */
+const TYPING_STOP_AFTER_MS = 2500;
+
+/** Ticks the typing indicator and the presence summary. */
+const TICK_MS = 1000;
+
 /**
  * A message that exists only in this browser.
  *
- * Used when there is no session, so the composer still responds. The id is
- * marked as local and never sent, so it cannot collide with a real one.
- *
- * `deleted: false` and `editedAt: null` are stated rather than omitted because
- * `ChatMessage` is the API's type (see the note in lib/data.ts) and those fields
- * are what tell the renderer a message is a tombstone or has been edited. An
- * optimistic message that left them undefined would not render as sent.
+ * Used when there is no session, so the composer still responds. The id is marked
+ * local and never sent, so it cannot collide with a real one.
  */
-function localEcho(authorId: string, channelId: string, body: string): ChatMessage {
+function localEcho(authorId: string, channelId: string, body: string): DisplayMessage {
   return {
     id: `local-${authorId}-${Date.now()}`,
     channelId,
@@ -41,6 +70,7 @@ function localEcho(authorId: string, channelId: string, body: string): ChatMessa
     editedAt: null,
     parentId: null,
     parentAuthor: null,
+    localOnly: true,
   };
 }
 
@@ -56,46 +86,62 @@ export function ChatClient({
   currentUserId: string;
 }) {
   const [activeId, setActiveId] = useState(channels[0]?.id ?? '');
-  const [allMessages, setAllMessages] = useState<ChatMessage[]>(initialMessages);
-  const [draft, setDraft] = useState('');
+  const [allMessages, setAllMessages] = useState<DisplayMessage[]>(initialMessages);
   const [thread, setThread] = useState<Thread>('chat');
   const [term, setTerm] = useState('');
 
-  // `people` arrives from a server component, so it is always the static
-  // fixture. Overlaying the signed-in user means a rename in Settings shows up
-  // in the member list and on your own messages, not just in the sidebar.
+  const [live, setLive] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [composerError, setComposerError] = useState<string | null>(null);
+  const [connection, setConnection] = useState<RealtimeStatus>('closed');
+
+  // --- slice 3: presence, typing, and the frames that were being dropped ---
+  const [online, setOnline] = useState<Set<string>>(new Set());
+  const [typing, setTyping] = useState<TypingPeer[]>([]);
+  const [now, setNow] = useState(() => Date.now());
+
+  // --- slice 4: attachments ---
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+
+  // --- slice 5: pagination and the message being replied to (slice 6) ---
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<{ message: DisplayMessage; authorName: string } | null>(null);
+
+  // Phones show the thread full width with the channel list as a slide-over, so the
+  // same "which panel is in front" state has to live here. Inert above 760px.
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  const active = channels.find((c) => c.id === activeId) ?? channels[0];
+
+  // Read inside the socket handler, which is created once. Without a ref the
+  // handler would close over the first channel and never see a change.
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
+
+  const onlineRef = useRef(online);
+  onlineRef.current = online;
+
+  // The socket itself, in a ref so the composer and the typing timer can reach it
+  // without the handlers depending on it and re-subscribing on every change.
+  const socketRef = useRef<RealtimeClient | null>(null);
+
+  /*
+   * `people` arrives from a server component, so it is always the static fixture.
+   * Overlaying the signed-in user means a rename in Settings shows up in the member
+   * list and on your own messages, not just in the sidebar.
+   */
   const me = useActivePerson();
   const resolvedPeople = useMemo(
     () => people.map((person) => (person.id === me.id ? me : person)),
     [people, me],
   );
 
-  // Phones show the thread full width with the channel list as a slide-over,
-  // so the same "which panel is in front" state has to live here. It is inert
-  // above 760px, where the two columns are visible side by side.
-  const [drawerOpen, setDrawerOpen] = useState(false);
-
-  const active = channels.find((c) => c.id === activeId) ?? channels[0];
-
-  /* ---------------------------------------------------------------- */
-  /* Live data                                                        */
-  /* ---------------------------------------------------------------- */
-
-  /*
-   * The fixtures are still the fallback, and that is deliberate rather than
-   * unfinished: the rest of the app reads from them, and a visitor who reaches
-   * /chat before signing in should see a working thread rather than an error.
-   * Once the API answers, the thread is replaced with the real one.
-   */
-  const [live, setLive] = useState(false);
-  const [sending, setSending] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [connection, setConnection] = useState<RealtimeStatus>('closed');
-
-  // Read inside the socket handler, which is created once. Without a ref the
-  // handler would close over the first channel and never see a change.
-  const activeIdRef = useRef(activeId);
-  activeIdRef.current = activeId;
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), TICK_MS);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (!active) return;
@@ -105,19 +151,24 @@ export function ChatClient({
     const channelId = active.id;
 
     setNotice(null);
+    setCursor(null);
+    setReplyingTo(null);
+    // Attachments belong to the channel they were uploaded for; carrying them
+    // across a switch would attach them to the wrong conversation.
+    setAttachments([]);
 
     api
       .messages(channelId)
-      .then(({ messages }) => {
+      .then((response) => {
         if (cancelled) return;
-        setAllMessages(messages);
+        setAllMessages(response.messages);
+        setCursor(response.nextCursor);
         setLive(true);
       })
       .catch((cause: unknown) => {
         if (cancelled) return;
-        // Unauthenticated is the expected case for a visitor who has not signed
-        // in, and retrying cannot fix it, so the fixtures stay and no socket is
-        // opened.
+        // Unauthenticated is the expected case for a visitor who has not signed in,
+        // and retrying cannot fix it, so the fixtures stay and no socket is opened.
         setLive(false);
         if (!(cause instanceof ApiError && cause.isUnauthorised)) {
           setNotice('Could not reach the server. Showing saved messages.');
@@ -132,7 +183,10 @@ export function ChatClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active?.id]);
 
-  // One socket for the page, resubscribed when the channel changes.
+  /* ---------------------------------------------------------------- */
+  /* Realtime                                                          */
+  /* ---------------------------------------------------------------- */
+
   useEffect(() => {
     if (!live || !active) return;
     const channelId = active.id;
@@ -140,32 +194,101 @@ export function ChatClient({
     const client = new RealtimeClient({
       onStatus: setConnection,
       onFrame: (frame) => {
-        if (frame.type !== 'message.created' && frame.type !== 'message.updated') return;
-        const incoming = frame.payload.message as LiveMessage | undefined;
-        if (!incoming || incoming.channelId !== activeIdRef.current) return;
+        const payload = frame.payload as Record<string, unknown>;
 
-        setAllMessages((current) => {
-          const at = current.findIndex((m) => m.id === incoming.id);
-          // Replace in place for a reaction change, append for a new message.
-          if (at !== -1) {
-            const next = [...current];
-            next[at] = incoming;
+        // `message.deleted` used to be ignored entirely, which meant a message
+        // deleted by its author stayed on screen for everyone else until they
+        // reloaded. It is a tombstone rather than a removal, so the server sends
+        // the row's id and the client replaces rather than splices.
+        if (frame.type === 'message.deleted') {
+          const id = payload.messageId as string;
+          setAllMessages((current) =>
+            current.map((m) =>
+              m.id === id ? { ...m, deleted: true, body: '', attachments: [] } : m,
+            ),
+          );
+          return;
+        }
+
+        if (frame.type === 'presence.changed') {
+          const userId = payload.userId as string;
+          const status = payload.status as 'online' | 'away' | 'offline';
+          setOnline((current) => {
+            const next = new Set(current);
+            // `away` still counts as present: the person has a socket open and a
+            // message from them will arrive. Dropping them would make someone's dot
+            // disappear when they alt-tabbed.
+            if (status === 'offline') next.delete(userId);
+            else next.add(userId);
             return next;
-          }
-          return [...current, incoming];
-        });
+          });
+          return;
+        }
+
+        if (frame.type === 'typing.start' || frame.type === 'typing.stop') {
+          const userId = payload.userId as string;
+          // The server never echoes a typing frame to its sender, but a stale
+          // frame from before a channel switch could still arrive.
+          if (userId === currentUserId) return;
+
+          setTyping((current) => {
+            if (frame.type === 'typing.stop') {
+              return current.filter((peer) => peer.userId !== userId);
+            }
+            const name =
+              resolvedPeople.find((p) => p.id === userId)?.name ?? 'Someone';
+            const existing = current.find((peer) => peer.userId === userId);
+            const next: TypingPeer = {
+              userId,
+              name,
+              expiresAt: now + TYPING_TTL_MS,
+            };
+            return existing
+              ? current.map((peer) => (peer.userId === userId ? next : peer))
+              : [...current, next];
+          });
+          return;
+        }
+
+        // `file.created` carries a file that may not be attached to any message
+        // yet -- an upload in progress is not a message. So it is not rendered in
+        // the thread; it only invalidates the Files tab.
+        if (frame.type === 'file.created') {
+          setFilesNonce((n) => n + 1);
+          return;
+        }
+
+        if (frame.type === 'message.created' || frame.type === 'message.updated') {
+          const incoming = payload.message as LiveMessage | undefined;
+          if (!incoming || incoming.channelId !== activeIdRef.current) return;
+
+          setAllMessages((current) => {
+            const at = current.findIndex((m) => m.id === incoming.id);
+            // Replace in place for an edit or a reaction change, append for a new
+            // message. A replacement also clears any pending or failed flag,
+            // because the server's row is authoritative.
+            if (at !== -1) {
+              const next = [...current];
+              next[at] = { ...incoming, pending: false, failed: false };
+              return next;
+            }
+            return [...current, incoming];
+          });
+        }
       },
     });
 
+    socketRef.current = client;
     void client.connect();
     client.subscribe([channelId]);
 
-    // Closed on unmount and on every channel change. This is not the same as
-    // the client's own reconnect, which handles the server going away.
+    // Closed on unmount and on every channel change. This is not the same as the
+    // client's own reconnect, which handles the server going away.
     return () => {
+      socketRef.current = null;
       client.close();
     };
-  }, [live, active?.id]);
+  }, [live, active?.id, currentUserId, resolvedPeople, now]);
 
   // Marking read is a nicety; a failure must not surface as an error.
   useEffect(() => {
@@ -174,11 +297,336 @@ export function ChatClient({
     void api.markChannelRead(channelId).catch(() => undefined);
   }, [live, active?.id]);
 
+  /* ---------------------------------------------------------------- */
+  /* Typing, outbound                                                 */
+  /* ---------------------------------------------------------------- */
+
+  const typingSentRef = useRef(false);
+  const typingStopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function signalTyping(typing: boolean) {
+    const client = socketRef.current;
+    if (!client || !active) return;
+
+    if (typing) {
+      if (!typingSentRef.current) {
+        client.send('typing.start', { channelId: active.id });
+        typingSentRef.current = true;
+      }
+      // Restarted on every keystroke, so the stop only fires once the user pauses.
+      // Without the reset, a fast typist would see their own indicator cut off
+      // mid-word from a previous pause.
+      if (typingStopTimer.current) clearTimeout(typingStopTimer.current);
+      typingStopTimer.current = setTimeout(() => {
+        client.send('typing.stop', { channelId: active.id });
+        typingSentRef.current = false;
+      }, TYPING_STOP_AFTER_MS);
+      return;
+    }
+
+    if (!typingSentRef.current) return;
+    if (typingStopTimer.current) clearTimeout(typingStopTimer.current);
+    client.send('typing.stop', { channelId: active.id });
+    typingSentRef.current = false;
+  }
+
+  // A channel switch mid-sentence must not leave the indicator running in the old
+  // one. The server drops stale typing on the next keystroke, but the peer list
+  // would keep a ghost entry until its TTL expired.
+  useEffect(() => {
+    signalTyping(false);
+    setTyping([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.id]);
+
+  /* ---------------------------------------------------------------- */
+  /* Messages                                                          */
+  /* ---------------------------------------------------------------- */
 
   const threadMessages = useMemo(
     () => allMessages.filter((m) => m.channelId === activeId),
     [allMessages, activeId],
   );
+
+  /** Newest at the bottom, matching the order the API returns. */
+  const ordered = useMemo(
+    () => [...threadMessages].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    [threadMessages],
+  );
+
+  function upsert(message: DisplayMessage) {
+    setAllMessages((current) => {
+      const at = current.findIndex((m) => m.id === message.id);
+      if (at === -1) return [...current, message];
+      const next = [...current];
+      next[at] = message;
+      return next;
+    });
+  }
+
+  /**
+   * Sends optimistically.
+   *
+   * The message appears immediately with a temporary id and a `pending` flag, then
+   * the server's row replaces it. Waiting for the round trip before appending --
+   * which is what this did before -- is correct and feels broken: nothing moves
+   * until the response lands, and on a Render instance waking from a cold start
+   * that is several seconds.
+   *
+   * A failure leaves the message on screen with a Retry button rather than
+   * silently reverting, because a message that vanishes is a message the user
+   * thinks they sent.
+   */
+  function send(body: string, attachmentIds: string[], parentId: string | null) {
+    if (!active) return;
+
+    if (!live) {
+      setAllMessages((current) => [...current, localEcho(currentUserId, active.id, body)]);
+      setNotice('Not signed in, so this message was not sent.');
+      return;
+    }
+
+    const tempId = `pending-${currentUserId}-${Date.now()}`;
+    const optimistic: DisplayMessage = {
+      id: tempId,
+      channelId: active.id,
+      authorId: currentUserId,
+      body,
+      createdAt: new Date().toISOString(),
+      reactions: [],
+      attachments: attachmentIds.map((id) => ({ id, name: 'Attachment', size: 0, type: '' })),
+      deleted: false,
+      editedAt: null,
+      parentId,
+      parentAuthor: replyingTo?.authorName ?? null,
+      pending: true,
+    };
+
+    setAllMessages((current) => [...current, optimistic]);
+    setSending(true);
+    setComposerError(null);
+
+    api
+      .sendMessage(active.id, body, attachmentIds, parentId ?? undefined)
+      .then(({ message }) => {
+        // Replace the temporary row rather than appending, or the optimistic copy
+        // would sit next to the real one.
+        setAllMessages((current) =>
+          current.map((m) => (m.id === tempId ? message : m)),
+        );
+        setNotice(null);
+        setReplyingTo(null);
+      })
+      .catch((cause: unknown) => {
+        setAllMessages((current) =>
+          current.map((m) => (m.id === tempId ? { ...m, pending: false, failed: true } : m)),
+        );
+        setComposerError(
+          cause instanceof ApiError ? cause.message : 'Could not send that message.',
+        );
+      })
+      .finally(() => setSending(false));
+  }
+
+  /** Re-sends a message that failed, reusing its optimistic row. */
+  function retry(message: DisplayMessage) {
+    if (!active) return;
+
+    setAllMessages((current) =>
+      current.map((m) => (m.id === message.id ? { ...m, pending: true, failed: false } : m)),
+    );
+    setComposerError(null);
+
+    api
+      .sendMessage(
+        active.id,
+        message.body,
+        message.attachments.map((a) => a.id),
+        message.parentId ?? undefined,
+      )
+      .then(({ message: sent }) => {
+        setAllMessages((current) =>
+          // The id changes on a retry, so the old row is matched by position
+          // rather than by the temporary id it no longer has.
+          current.map((m) => (m.id === message.id ? sent : m)),
+        );
+      })
+      .catch((cause: unknown) => {
+        setAllMessages((current) =>
+          current.map((m) => (m.id === message.id ? { ...m, pending: false, failed: true } : m)),
+        );
+        setComposerError(
+          cause instanceof ApiError ? cause.message : 'Could not send that message.',
+        );
+      });
+  }
+
+  function react(message: DisplayMessage, emoji: string) {
+    if (!live) {
+      setNotice('Sign in to react to messages.');
+      return;
+    }
+
+    // Optimistic here too. A reaction that waits for the round trip reads as
+    // dropped input, because the user has usually already typed the next word.
+    const mine = message.reactions.find((r) => r.emoji === emoji)?.userIds.includes(currentUserId);
+    const nextReactions = mine
+      ? message.reactions
+          .map((r) =>
+            r.emoji === emoji
+              ? { ...r, userIds: r.userIds.filter((id) => id !== currentUserId) }
+              : r,
+          )
+          .filter((r) => r.userIds.length > 0)
+      : [
+          ...message.reactions.map((r) =>
+            r.emoji === emoji ? { ...r, userIds: [...r.userIds, currentUserId] } : r,
+          ),
+        ];
+
+    upsert({ ...message, reactions: nextReactions });
+
+    api.toggleReaction(message.id, emoji).catch((cause: unknown) => {
+      // Rolled back to the server's view, because a reaction chip that survives a
+      // failed request is a lie about who reacted.
+      void api
+        .messages(activeId)
+        .then(({ messages: fresh }) =>
+          setAllMessages((current) => {
+            const byId = new Map(fresh.map((m) => [m.id, m]));
+            return current.map((m) => byId.get(m.id) ?? m);
+          }),
+        )
+        .catch(() =>
+          upsert({
+            ...message,
+            reactions: message.reactions,
+          }),
+        );
+      setComposerError(
+        cause instanceof ApiError ? cause.message : 'Could not save that reaction.',
+      );
+    });
+  }
+
+  function edit(message: DisplayMessage, body: string) {
+    upsert({ ...message, body, editedAt: new Date().toISOString() });
+
+    api.editMessage(message.id, body).catch((cause: unknown) => {
+      // Reverted to the body we had, because a local edit that the server refused
+      // would be shown to everyone else as the old text and to the author as the
+      // new one.
+      upsert(message);
+      setComposerError(cause instanceof ApiError ? cause.message : 'Could not save that edit.');
+    });
+  }
+
+  function remove(message: DisplayMessage) {
+    // Replaced with the tombstone locally rather than spliced out, so the thread
+    // keeps its shape and the replies under it stay where the reader left them.
+    upsert({ ...message, deleted: true, body: '', attachments: [] });
+
+    api.deleteMessage(message.id).catch((cause: unknown) => {
+      upsert(message);
+      setComposerError(cause instanceof ApiError ? cause.message : 'Could not delete that.');
+    });
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Attachments                                                       */
+  /* ---------------------------------------------------------------- */
+
+  function upload(file: File) {
+    if (!active) return;
+
+    const localId = `attach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setAttachments((current) => [
+      ...current,
+      {
+        localId,
+        name: file.name,
+        size: file.size,
+        mimeType: file.type,
+        status: 'uploading',
+      },
+    ]);
+
+    api
+      .uploadFile(file, file.name, { channelId: active.id })
+      .then(({ file: uploaded }) => {
+        setAttachments((current) =>
+          current.map((a) =>
+            a.localId === localId
+              ? { ...a, status: 'ready' as const, file: uploaded }
+              : a,
+          ),
+        );
+      })
+      .catch((cause: unknown) => {
+        setAttachments((current) =>
+          current.map((a) =>
+            a.localId === localId
+              ? {
+                  ...a,
+                  status: 'failed' as const,
+                  error: cause instanceof ApiError ? cause.message : 'Upload failed',
+                }
+              : a,
+          ),
+        );
+      });
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Pagination                                                        */
+  /* ---------------------------------------------------------------- */
+
+  const [filesNonce, setFilesNonce] = useState(0);
+  const [channelFiles, setChannelFiles] = useState<FileRow[]>([]);
+
+  useEffect(() => {
+    if (!live || !active || thread !== 'files') return;
+    const channelId = active.id;
+    let cancelled = false;
+
+    api
+      .files({ channelId })
+      .then(({ files }) => {
+        if (!cancelled) setChannelFiles(files);
+      })
+      .catch(() => {
+        // The tab already has an empty state that says what to do; a second error
+        // line about it would be noise.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [live, active?.id, thread, filesNonce]);
+
+  async function loadMore() {
+    if (!cursor || loadingMore || !active) return;
+    setLoadingMore(true);
+    try {
+      const response = await api.messages(active.id, cursor);
+      setAllMessages((current) => {
+        // Deduped by id, because a message sent between the first page and this
+        // one can appear in both -- the cursor is stable, but the window is not
+        // frozen.
+        const known = new Set(current.map((m) => m.id));
+        return [...current, ...response.messages.filter((m) => !known.has(m.id))];
+      });
+      setCursor(response.nextCursor);
+    } catch (cause) {
+      setNotice(
+        cause instanceof ApiError && cause.isUnauthorised
+          ? 'Sign in to load earlier messages.'
+          : 'Could not load earlier messages.',
+      );
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   const visibleChannels = useMemo(() => {
     const query = term.trim().toLowerCase();
@@ -191,37 +639,30 @@ export function ChatClient({
     [resolvedPeople, active],
   );
 
-  function send(event: React.FormEvent) {
-    event.preventDefault();
-    const body = draft.trim();
-    if (!body || !active || sending) return;
-
-    setDraft('');
-    setSending(true);
-
-    if (!live) {
-      // No session, or the API is unreachable. Append locally so the thread still
-      // responds, and say so rather than pretending it was delivered.
-      setAllMessages((current) => [...current, localEcho(currentUserId, active.id, body)]);
-      setNotice('Not signed in, so this message was not sent.');
-      setSending(false);
-      return;
-    }
-
-    api
-      .sendMessage(active.id, body)
-      .then(({ message }) => {
-        // Append the server's copy rather than the local echo: it carries the
-        // real id, the real timestamp and the trimmed body.
-        setAllMessages((current) => (current.some((m) => m.id === message.id) ? current : [...current, message]));
-        setNotice(null);
-      })
-      .catch((cause: unknown) => {
-        setDraft(body);
-        setNotice(cause instanceof ApiError ? cause.message : 'Could not send that message.');
-      })
-      .finally(() => setSending(false));
+  /** Scrolls the thread to a message, for the "Replying to" jump. */
+  function jumpTo(messageId: string) {
+    const element = document.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`);
+    element?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }
+
+  function replyTo(message: DisplayMessage) {
+    setReplyingTo({
+      message,
+      authorName:
+        message.authorId === currentUserId
+          ? 'your message'
+          : (resolvedPeople.find((p) => p.id === message.authorId)?.name ?? 'a message'),
+    });
+    setThread('chat');
+  }
+
+  const connectionLabel = !live
+    ? 'Saved messages — sign in for live chat'
+    : connection === 'open'
+      ? 'Live'
+      : connection === 'reconnecting'
+        ? 'Reconnecting…'
+        : 'Connecting…';
 
   return (
     <div
@@ -238,11 +679,11 @@ export function ChatClient({
           aria-label="Close channels"
         />
       )}
+
       {/* Channel list */}
       <div className="panel">
         <div className="panel-head">
           <strong>Channels</strong>
-          <span className="unread">{channels.length}</span>
           {drawerOpen && (
             <button
               type="button"
@@ -267,49 +708,37 @@ export function ChatClient({
           </label>
         </div>
 
-        <div className="list">
+        <div className="chat-panel">
           {visibleChannels.map((channel) => (
             <button
-              type="button"
               key={channel.id}
+              className={channel.id === activeId ? 'chat-back active' : 'chat-back'}
               onClick={() => {
                 setActiveId(channel.id);
                 setDrawerOpen(false);
               }}
-              className={channel.id === activeId ? 'conversation active' : 'conversation'}
             >
-              <Hash size={16} />
-              <div>
-                <strong>{channel.name}</strong>
-                <small>{channel.teamName}</small>
-              </div>
+              <Hash size={15} />
+              <span>{channel.name}</span>
+              {/* Unread is computed per reader by the API, so this is a real count.
+                  It was a fixture number before the channel list went live. */}
               {channel.unread > 0 && <span className="unread">{channel.unread}</span>}
             </button>
           ))}
-          {visibleChannels.length === 0 && (
-            <div className="empty-state" style={{ padding: 30 }}>
-              <p>No channels match &ldquo;{term.trim()}&rdquo;.</p>
-            </div>
-          )}
         </div>
       </div>
 
       {/* Thread */}
-      <div className="panel chat-panel">
+      <div className="panel">
         <div className="panel-head">
-          {/* Only rendered in the phone layout, where the channel list is a
-              slide-over and this is the way back to it. */}
           <button
-            type="button"
-            className="chat-back"
+            className="icon-btn"
             onClick={() => setDrawerOpen(true)}
             aria-label="Show channels"
           >
-            <ChevronLeft size={16} /> Channels
+            <ChevronLeft size={16} />
           </button>
-          <strong>
-            <Hash size={15} /> {active?.name}
-          </strong>
+          <strong>#{active?.name}</strong>
           <span className="unread">{members.length} members</span>
         </div>
 
@@ -321,6 +750,12 @@ export function ChatClient({
               onClick={() => setThread(option.id)}
             >
               {option.label}
+              {option.id === 'chat' && ordered.length > 0 && (
+                <span className="unread">{ordered.length}</span>
+              )}
+              {option.id === 'files' && channelFiles.length > 0 && (
+                <span className="unread">{channelFiles.length}</span>
+              )}
             </button>
           ))}
         </div>
@@ -328,70 +763,56 @@ export function ChatClient({
         {thread === 'chat' && (
           <>
             <div className="chat-body">
-              {threadMessages.length === 0 ? (
+              {ordered.length === 0 ? (
                 <div className="empty-state">
-                  <span className="empty-icon">
-                    <Hash size={22} />
-                  </span>
                   <p>This channel is quiet so far. Be the first to post.</p>
                 </div>
               ) : (
-                threadMessages.map((message) => {
-                  const author = resolvedPeople.find((p) => p.id === message.authorId);
-                  const mine = message.authorId === currentUserId;
+                <ul className="result-list" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                  {/*
+                    Older history loads on demand rather than up front. The API
+                    pages with an opaque cursor and `before` was never being passed,
+                    so a channel with more than fifty messages simply had no older
+                    half.
+                  */}
+                  {cursor && (
+                    <li style={{ padding: '8px 0', textAlign: 'center' }}>
+                      <button
+                        type="button"
+                        className="chip"
+                        onClick={loadMore}
+                        disabled={loadingMore}
+                      >
+                        {loadingMore ? 'Loading…' : 'Load earlier messages'}
+                      </button>
+                    </li>
+                  )}
 
-                  return (
-                    <div className={mine ? 'msg mine' : 'msg'} key={message.id}>
-                      <PersonAvatar person={author} size="sm" />
-                      <div>
-                        <div className="meeting-info" style={{ marginBottom: 2 }}>
-                          <strong>
-                            {mine ? 'You' : (author?.name ?? 'Unknown')}{' '}
-                            <small style={{ color: 'var(--muted)', fontWeight: 400 }}>
-                              {relativeTime(message.createdAt)}
-                            </small>
-                          </strong>
-                        </div>
-
-                        <div className="bubble">
-                          {message.body}
-                          {message.attachments.map((file) => (
-                            <div key={file.id} className="bubble-attachment">
-                              <Paperclip size={11} /> {file.name}
-                            </div>
-                          ))}
-                        </div>
-
-                        {message.reactions.length > 0 && (
-                          <div className="reactions">
-                            {message.reactions.map((reaction) => (
-                              <span className="reaction" key={reaction.emoji}>
-                                {reaction.emoji} {reaction.userIds.length}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })
+                  {ordered.map((message) => (
+                    <MessageRow
+                      key={message.id}
+                      message={message}
+                      author={resolvedPeople.find((p) => p.id === message.authorId)}
+                      currentUserId={currentUserId}
+                      onReact={react}
+                      onReply={replyTo}
+                      onEdit={edit}
+                      onDelete={remove}
+                      onRetry={retry}
+                      onJumpTo={jumpTo}
+                    />
+                  ))}
+                </ul>
               )}
             </div>
 
-            {/*
-              Whether this thread is real. Shown because a demo that silently
-              mixes live and fixture data is impossible to tell apart from one
-              that is not working -- and the distinction matters when someone is
-              judging whether the app does what it claims.
-            */}
+            <TypingIndicator peers={typing} now={now} />
+
+            {/* Whether the thread is real. Shown because a demo that silently
+                mixes live and fixture data is impossible to tell apart from one
+                that is not working. */}
             <p className="composer-status" role="status">
-              {!live ? 'Saved messages — sign in for live chat' : (
-                connection === 'open'
-                  ? 'Live'
-                  : connection === 'reconnecting'
-                    ? 'Reconnecting…'
-                    : 'Connecting…'
-              )}
+              {connectionLabel}
             </p>
 
             {notice && (
@@ -400,51 +821,57 @@ export function ChatClient({
               </p>
             )}
 
-            <form className="composer" onSubmit={send}>
-              <input
-                placeholder={`Message #${active?.name ?? ''}`}
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                aria-label="Message"
-              />
-              <button
-                className="icon-btn"
-                type="button"
-                aria-label="Attach a file"
-                disabled
-                title="Attachments need a backend"
-              >
-                <Paperclip size={16} />
-              </button>
-              <button
-                className="send"
-                type="submit"
-                disabled={!draft.trim() || sending}
-                aria-label="Send message"
-              >
-                <Send size={16} />
-              </button>
-            </form>
+            <Composer
+              channelName={active?.name ?? ''}
+              replyingTo={replyingTo}
+              onCancelReply={() => setReplyingTo(null)}
+              live={live}
+              sending={sending}
+              onSend={send}
+              onUpload={upload}
+              onRemoveAttachment={(localId) =>
+                setAttachments((current) => current.filter((a) => a.localId !== localId))
+              }
+              attachments={attachments}
+              onTypingChange={signalTyping}
+              error={composerError}
+            />
           </>
         )}
 
         {thread === 'files' && (
-          <div className="empty-state">
-            <span className="empty-icon">
-              <Paperclip size={22} />
-            </span>
-            <p>No files in this channel yet.</p>
-            <span className="empty-meta">Shared documents appear here</span>
+          <div className="chat-body">
+            {channelFiles.length === 0 ? (
+              <div className="empty-state">
+                <p>No files in this channel yet.</p>
+                <span className="empty-meta">Attach one from the composer</span>
+              </div>
+            ) : (
+              <ul className="result-list" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                {channelFiles.map((file) => (
+                  <li className="bubble-attachment" key={file.id}>
+                    <strong>{file.name}</strong>
+                    <small>
+                      {file.isFolder ? 'Folder' : formatBytes(file.size)} &bull;{' '}
+                      {relativeTime(file.createdAt)}
+                    </small>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
 
+        {/*
+          Meeting chat is genuinely unreachable, not merely unwired: three seeded
+          messages have a meetingId and no channelId, and GET /api/messages
+          requires a channelId. So this tab says where the chat lives rather than
+          claiming an empty room.
+        */}
         {thread === 'meetings' && (
           <div className="empty-state">
-            <span className="empty-icon">
-              <MessageSquare size={22} />
-            </span>
-            <p>No meetings scheduled in this channel.</p>
-            <span className="empty-meta">Create one from the calendar</span>
+            <p>Meeting chat opens inside the room.</p>
+            <span className="empty-meta">Join a meeting to read or post there</span>
           </div>
         )}
       </div>
@@ -459,7 +886,10 @@ export function ChatClient({
         <div className="members">
           {members.map((person) => (
             <div className="member" key={person.id}>
-              <PersonAvatar person={person} size="sm" online={person.online} />
+              {/* Presence from the socket, so a dot updates while the page is open.
+                  The fixture's static `online` flag is the fallback when there is no
+                  session, which is the only time it is consulted. */}
+              <PersonAvatar person={person} size="sm" online={online.size > 0 ? online.has(person.id) : person.online} />
               <div>
                 <strong>
                   {person.name}
