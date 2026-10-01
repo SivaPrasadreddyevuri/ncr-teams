@@ -21,12 +21,12 @@
                 },
     "dependencies":  {
                          "@prisma/client":  "6.19.3",
-                         "dotenv":  "^16.4.7"
+                         "dotenv":  "^16.4.7",
+                         "prisma":  "6.19.3"
                      },
     "devDependencies":  {
                             "@types/pg":  "^8.23.1",
                             "pg":  "^8.13.1",
-                            "prisma":  "6.19.3",
                             "tsx":  "4.23.15",
                             "typescript":  "^5.7.3"
                         },
