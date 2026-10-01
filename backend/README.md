@@ -82,6 +82,34 @@ uploads far inside a hosted Postgres free tier, and `bytea` is only appropriate
 while that stays true. The moment genuine multi-megabyte uploads matter, the
 content belongs in object storage and `File` keeps a key again.
 
+## Deployment: what the health endpoint is for
+
+Render probes `/api/health` to decide whether to route traffic, so it must be
+unauthenticated and cheap. It answers liveness only — but it now **reports**
+database reachability in its body while still returning 200:
+
+```json
+{ "status": "ok", "uptime": 12, "db": "unreachable", "migrationsApplied": false }
+```
+
+That distinction is the whole point. Migrations are not applied by the blueprint
+(`preDeployCommand` is paid-plan), so a first deploy against an unmigrated
+database returns 503 from `/health/ready` while `/health` said `{"status":"ok"}`.
+Render watches the first, reported the service healthy, and every real request
+failed. It looked like a working deploy.
+
+So liveness stays 200 — a database blip should not restart-loop a healthy process —
+and carries `db` and `migrationsApplied` so a human can tell "deployed" from
+"usable" in one request. **Check `migrationsApplied` after the first deploy.**
+
+`/api/health/ready` remains the 503-on-no-database endpoint, for a deploy step or
+a manual check that wants the strict answer.
+
+The unreachable branch is not unit-tested: `createApp()` builds routes over the
+shared Prisma singleton, so testing it would mean injecting a broken client into
+every route. It is exercised by the deploy runbook instead, which is stated in
+`test/health.test.ts` rather than glossed over.
+
 ## Realtime
 
 ### The WebSocket (`/ws`)
