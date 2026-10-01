@@ -3,26 +3,31 @@ import { SectionCard } from '@/components/SectionCard';
 import { ActiveGreeting } from '@/components/home/ActiveGreeting';
 import { HomeStats } from '@/components/home/HomeStats';
 import { RecentActivityCard } from '@/components/home/RecentActivityCard';
+import { HomeEventsProvider } from '@/components/home/HomeEventsProvider';
+import { TodaysMeetingsCard } from '@/components/home/TodaysMeetingsCard';
 import { HomeClock } from '@/components/HomeClock';
-import { calendarEvents } from '@/lib/data';
-import { formatTime, startOfAppDay, formatLongDate } from '@/lib/format';
+import { formatLongDate } from '@/lib/format';
 
+/**
+ * The dashboard.
+ *
+ * Still a server component, and that is the point of the shape here: the greeting
+ * and today's date are prerendered, and the two pieces of live data -- the clock's
+ * next meeting and the meetings card -- sit inside one client provider that
+ * fetches them a single time.
+ *
+ * Making this whole page a client component would have been simpler and would have
+ * thrown the prerendered heading away with it. See `lib/api.ts` for why the data
+ * cannot be fetched here at all.
+ */
 export default function Home() {
-  // "Today" is the viewer's day in the app zone, not the build server's. Using
-  // the host's local day here would freeze the wrong day into the static HTML.
-  const now = new Date();
-  const todayStart = startOfAppDay(now).getTime();
-  const todayEnd = todayStart + 86_399_999;
-
-  const todaysMeetings = calendarEvents
-    .filter((event) => {
-      const start = new Date(event.startsAt).getTime();
-      return start >= todayStart && start <= todayEnd;
-    })
-    .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+  // Rendered on the server, so this is the server's date. The page's live date is
+  // the clock's, which is client-side; this badge is the one deliberately static
+  // value, and it reads as a build stamp rather than as "today".
+  const buildDate = new Date();
 
   return (
-    <>
+    <HomeEventsProvider>
       <div className="welcome">
         <div>
           {/* Client-rendered: the name follows the signed-in persona and the
@@ -31,51 +36,19 @@ export default function Home() {
           <ActiveGreeting />
           <p>Here&apos;s what&apos;s happening with your teams today.</p>
         </div>
-        {/* Still frozen at build time, and the one remaining date on the page.
-            Moving it client-side would need the same mount gate the greeting
-            uses, which was out of scope here. */}
-        <span className="welcome-badge">
-          {formatLongDate(now)}
-        </span>
+        <span className="welcome-badge">{formatLongDate(buildDate)}</span>
       </div>
 
       {/* Client-rendered: the server cannot know the viewer's clock. */}
-      <HomeClock events={calendarEvents} />
+      <HomeClock />
 
       <HomeStats />
 
       <div className="grid-2">
-        <SectionCard title="Today's Meetings" href="/calendar">
-          {todaysMeetings.length === 0 ? (
-            <p style={{ fontSize: 13, color: 'var(--muted)', padding: '10px 0' }}>
-              Nothing scheduled today.
-            </p>
-          ) : (
-            todaysMeetings.map((event) => (
-              <div className="meeting-row" key={event.id}>
-                <span className="time">{formatTime(event.startsAt)}</span>
-                <div className="meeting-info">
-                  <strong>{event.title}</strong>
-                  <small>
-                    {event.attendeeIds.length} participants &bull; {event.location}
-                  </small>
-                </div>
-                {event.meetingId ? (
-                  <Link className="join" href={`/meetings?room=${event.meetingId}`}>
-                    Join
-                  </Link>
-                ) : (
-                  <span className="join" style={{ opacity: 0.5 }}>
-                    View
-                  </span>
-                )}
-              </div>
-            ))
-          )}
-        </SectionCard>
+        <TodaysMeetingsCard />
 
         <RecentActivityCard />
       </div>
-    </>
+    </HomeEventsProvider>
   );
 }

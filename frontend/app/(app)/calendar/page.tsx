@@ -1,12 +1,5 @@
-import { CalendarWeek } from '@/components/calendar/CalendarWeek';
-import { calendarEvents, currentUser, directory } from '@/lib/data';
+import { CalendarScreen } from '@/components/calendar/CalendarScreen';
 
 export default function CalendarPage() {
-  return (
-    <CalendarWeek
-      initialEvents={calendarEvents}
-      people={directory}
-      currentUserId={currentUser.id}
-    />
-  );
+  return <CalendarScreen />;
 }

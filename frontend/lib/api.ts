@@ -60,6 +60,38 @@ type RequestOptions = {
   signal?: AbortSignal;
 };
 
+/**
+ * Calls the backend.
+ *
+ * ## This is browser-only, and a page that needs data must be a client component
+ *
+ * The URL is relative on purpose -- same-origin, so the httpOnly session cookie
+ * rides along and there is no cross-site cookie anywhere.
+ *
+ * The consequence is that this cannot run in a server component. A server
+ * component has no origin to resolve `/api/...` against and, more fundamentally,
+ * no access to the session cookie: it lives on the browser's jar. So it cannot
+ * call an authenticated endpoint on the user's behalf, no matter what base URL the
+ * server is given. Pointing it at `API_ORIGIN` would produce a request as
+ * *nobody*.
+ *
+ * It does not throw, either, which is what makes this expensive to rediscover: a
+ * server component that awaits one of these hangs rather than failing, so
+ * `next build` spends 60 seconds per page retrying and then gives up with "took
+ * more than 60 seconds" -- which reads like a slow page, not a wrong architecture.
+ *
+ * Fetching server-side is the right call for a *public* endpoint, and there is
+ * none yet. When there is, this function should grow an absolute-URL branch for
+ * server callers rather than every page being made a client component forever.
+ *
+ * Until then, every screen that needs data is a client component using
+ * `useApiData`, whose fallback chain is live API -> cache -> seed. The route files
+ * stay server components wrapping them in a `<Screen />`, so a page can still gain
+ * a server-rendered heading without unpicking its data fetching. Examples:
+ * `components/activity/ActivityScreen.tsx`, `components/calendar/CalendarScreen.tsx`,
+ * and `components/home/HomeEventsProvider.tsx` for the case where two siblings
+ * need one fetch.
+ */
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const method = options.method ?? 'GET';
   const headers: Record<string, string> = {};
@@ -146,12 +178,11 @@ export type Channel = {
 /**
  * One search hit.
  *
- * `snippet` is server-rendered HTML-ish text: `ts_headline` wraps the matched
- * words in `<mark>` server-side, because only the database knows which words the
- * tsquery actually matched. The page renders it as text with those markers turned
- * into elements -- it is never passed to dangerouslySetInnerHTML, since the
- * surrounding text is user-authored and this is a page reachable without any
- * sanitisation step.
+ * `snippet` is server-rendered text with the matched words wrapped in `<mark>`
+ * by `ts_headline`, because only the database knows which words the tsquery
+ * actually matched. The page turns those markers into elements -- it is never
+ * passed to dangerouslySetInnerHTML, since the surrounding text is
+ * user-authored and this page has no sanitisation step.
  */
 export type SearchResult = {
   id: string;
@@ -291,14 +322,7 @@ export const api = {
   },
   departments: (signal?: AbortSignal) =>
     request<{ departments: Department[] }>('/departments', { signal }),
-  activity: (limit = 20, before?: string, signal?: AbortSignal) => {
-    const query = new URLSearchParams({ limit: String(limit) });
-    if (before) query.set('before', before);
-    return request<{ activity: ActivityItem[]; nextCursor: string | null }>(
-      `/activity?${query}`,
-      { signal },
-    );
-  },
+  // `activity` is defined once, further down beside the other feed/search calls.
   markChannelRead: (channelId: string) =>
     request<{ lastReadAt: string }>(`/channels/${encodeURIComponent(channelId)}/read`, {
       method: 'POST',
@@ -366,4 +390,151 @@ export const api = {
       scope: string;
     }>(`/search?${query}`, { signal });
   },
+
+  /* events */
+  /**
+   * Calendar events in a window.
+   *
+   * The window is passed rather than a `days` count, so a caller asking for "this
+   * week" sends the week it means. An `allEvents` shorthand is offered for the
+   * screens that genuinely want the default horizon.
+   */
+  events: (
+    params: { from?: string; to?: string; days?: number; limit?: number } = {},
+    signal?: AbortSignal,
+  ) => {
+    const query = new URLSearchParams();
+    if (params.from) query.set('from', params.from);
+    if (params.to) query.set('to', params.to);
+    if (params.days) query.set('days', String(params.days));
+    if (params.limit) query.set('limit', String(params.limit));
+    const suffix = query.toString();
+    return request<{ events: CalendarEventDto[]; from: string; to: string }>(
+      `/events${suffix ? `?${suffix}` : ''}`,
+      { signal },
+    );
+  },
+
+  /**
+   * The activity feed.
+   *
+   * Note what is *not* here: the fixture's `title` and `subtitle`. Those were prose
+   * frozen at seed time, so they go stale the moment anything is renamed. The feed
+   * is composed from `actor` and `target` in `composeActivity`, which is real work
+   * rather than a type alias -- which is why `ActivityItem` is not shared between
+   * the fixture and the API.
+   */
+  activity: (limit = 20, before?: string, signal?: AbortSignal) => {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (before) query.set('before', before);
+    return request<{ activity: ActivityRow[]; nextCursor: string | null }>(`/activity?${query}`, {
+      signal,
+    });
+  },
 };
+
+/** A calendar event as the API returns it. Replaces the fixture's CalendarEvent. */
+export type CalendarEventDto = {
+  id: string;
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  type: 'MEETING' | 'EVENT';
+  organizerId: string;
+  attendeeIds: string[];
+  /** Names as well as ids, so a row can render "3 people" or a face without a join. */
+  attendeeNames: string[];
+  meetingId: string | null;
+  location: string;
+};
+
+/** One feed row: who did something, to what. Never prose. */
+export type ActivityRow = {
+  id: string;
+  kind: 'message' | 'file' | 'meeting' | 'leave';
+  read: boolean;
+  createdAt: string;
+  actor: { id: string; name: string; avatarUrl: string | null } | null;
+  /**
+   * Null when the thing the notification points at has been deleted, or its type
+   * was added after the API was written. Null is honest; a placeholder title
+   * would be a lie.
+   */
+  target:
+    | { kind: 'message'; id: string; body: string; channelName: string | null }
+    | { kind: 'file'; id: string; name: string; sizeBytes: string }
+    | { kind: 'meeting'; id: string; title: string; startsAt: string }
+    | { kind: 'leave'; id: string; status: string; days: number; from: string; to: string }
+    | null;
+};
+
+/** What to say when the thing a notification pointed at is gone. */
+const REMOVED: Record<ActivityRow['kind'], string> = {
+  message: 'A message was removed',
+  file: 'A shared file was removed',
+  meeting: 'A meeting was removed',
+  leave: 'A leave request was removed',
+};
+
+/**
+ * Turns a structured feed row into the sentence the UI shows.
+ *
+ * This is the work the fixture's frozen `title`/`subtitle` used to do at seed
+ * time. Composing here rather than storing means renaming a channel updates every
+ * feed row that mentions it, rather than leaving a stale name in a string column.
+ *
+ * The switch is on `target.kind`, not `row.kind`. The two are correlated in
+ * practice -- a message notification points at a message -- but that correlation
+ * is not something the type system can express across two separate unions, so
+ * narrowing on `row.kind` would leave `target` un-narrowed and every property
+ * access an error. The API already guarantees the pairing, and `REMOVED` covers
+ * the case where the target is gone.
+ *
+ * `deletedTarget` is returned rather than a fake name because the honest answer to
+ * "this pointed at something that no longer exists" is to say so.
+ */
+export function composeActivity(row: ActivityRow): {
+  title: string;
+  subtitle: string;
+  deletedTarget: boolean;
+} {
+  const who = row.actor?.name ?? 'Someone';
+  const target = row.target;
+
+  if (!target) {
+    return { title: REMOVED[row.kind], subtitle: '', deletedTarget: true };
+  }
+
+  switch (target.kind) {
+    case 'message': {
+      const where = target.channelName ? ` in #${target.channelName}` : '';
+      return {
+        title: `${who} sent a message${where}`,
+        // Truncated here rather than in the response, so the sentence can never
+        // overflow the row however long the message is.
+        subtitle: target.body.length > 90 ? `${target.body.slice(0, 90)}…` : target.body,
+        deletedTarget: false,
+      };
+    }
+    case 'file':
+      return {
+        title: `${who} shared a file`,
+        subtitle: target.name,
+        deletedTarget: false,
+      };
+    case 'meeting':
+      return {
+        title: 'Meeting starting soon',
+        subtitle: target.title,
+        deletedTarget: false,
+      };
+    case 'leave':
+      return {
+        title: `Leave ${target.status}`,
+        subtitle: `${who} · ${target.days} day${target.days === 1 ? '' : 's'}`,
+        deletedTarget: false,
+      };
+    default:
+      return { title: 'Something happened', subtitle: '', deletedTarget: false };
+  }
+}

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Clock3, Timer } from 'lucide-react';
 import type { CalendarEvent } from '@/lib/data';
+import { useHomeEvents } from '@/components/home/HomeEventsProvider';
 import { formatTime } from '@/lib/format';
 import { readJson, storageKeys, writeJson } from '@/lib/storage';
 
@@ -50,7 +51,11 @@ function countdownLabel(ms: number): string {
  * agree with the server HTML or React reports a hydration mismatch. A fixed
  * placeholder is shown until mount, then replaced with real values.
  */
-export function HomeClock({ events }: { events: CalendarEvent[] }) {
+export function HomeClock() {
+  // Read from the provider rather than taking a prop: the home page's two uses of
+  // the event list are siblings, and a prop would mean one of them owned the fetch
+  // and the other could not have it.
+  const { events } = useHomeEvents();
   const [now, setNow] = useState<Date | null>(null);
   const [format, setFormat] = useState<ClockFormat>('12h');
   // Announced every 30s rather than 1s: a screen reader reading a changing

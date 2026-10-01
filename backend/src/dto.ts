@@ -192,3 +192,49 @@ export function toFileDto(row: FileRow, uploaded: boolean, viewerId: string): Fi
     deletedAt: row.deletedAt ? row.deletedAt.toISOString() : null,
   };
 }
+
+export type CalendarEventDto = {
+  id: string;
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  type: 'MEETING' | 'EVENT';
+  organizerId: string;
+  /** Names, because every consumer renders a face or a count, never a raw id. */
+  attendeeIds: string[];
+  attendeeNames: string[];
+  meetingId: string | null;
+  location: string;
+};
+
+type EventRow = {
+  id: string;
+  title: string;
+  startsAt: Date;
+  endsAt: Date;
+  type: 'MEETING' | 'EVENT';
+  location: string | null;
+  organizerId: string;
+  meetingId: string | null;
+  attendees: Array<{ user: { id: string; name: string } }>;
+  organizer: { id: string; name: string } | null;
+};
+
+export function toEventDto(row: EventRow): CalendarEventDto {
+  return {
+    id: row.id,
+    title: row.title,
+    startsAt: row.startsAt.toISOString(),
+    endsAt: row.endsAt.toISOString(),
+    type: row.type,
+    organizerId: row.organizerId,
+    // The fixture's `attendeeIds` were ids; `attendeeNames` is new and is what
+    // lets a caller render "Priya, Alex and Tom" without a second request.
+    attendeeIds: row.attendees.map((a) => a.user.id),
+    attendeeNames: row.attendees.map((a) => a.user.name),
+    meetingId: row.meetingId,
+    // Non-nullable in the response because every rendering path interpolates it
+    // into a sentence, and `null` there produces "in null".
+    location: row.location ?? '',
+  };
+}

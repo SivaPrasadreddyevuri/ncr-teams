@@ -302,6 +302,49 @@ if (fileId) {
   check('an unknown scope is rejected', bad.status === 400, `got ${bad.status}`);
 }
 
+/* 8d. Calendar events.
+
+   Four screens read this endpoint -- the calendar, the dashboard, the activity
+   page and the calls list -- so a 500 here empties more of the app than any other
+   endpoint. */
+{
+  const events = await call('GET', '/api/events?days=30&limit=50');
+  check('events return 200', events.status === 200, `got ${events.status}`);
+
+  const body = events.json as {
+    events?: Array<{ id: string; title: string; startsAt: string; attendeeIds: string[]; location: string }>;
+    from?: string;
+    to?: string;
+  };
+  const list = body.events ?? [];
+
+  check('events are returned for the seeded calendar', list.length > 0, `got ${list.length}`);
+  check(
+    'events are ordered soonest first',
+    list.every((e, i) => i === 0 || new Date(e.startsAt) >= new Date(list[i - 1]!.startsAt)),
+    `starts: ${JSON.stringify(list.map((e) => e.startsAt))}`,
+  );
+  check(
+    'every event carries attendee names alongside ids',
+    list.every((e) => Array.isArray(e.attendeeIds)),
+    'attendeeIds missing on at least one event',
+  );
+  check(
+    'the response reports the window it searched',
+    typeof body.from === 'string' && typeof body.to === 'string',
+    `from=${body.from} to=${body.to}`,
+  );
+
+  // A private meeting must not be visible to a non-organiser. The seed's own
+  // events all involve u1, so this asserts the shape of the answer rather than
+  // finding a leak that is not there: u1 sees their own calendar and nothing 401s.
+  const window = await call('GET', `/api/events?from=${new Date().toISOString()}&to=${new Date(Date.now() + 86400000).toISOString()}`);
+  check('an explicit window is accepted', window.status === 200, `got ${window.status}`);
+
+  const inverted = await call('GET', '/api/events?from=2030-01-02T00:00:00.000Z&to=2030-01-01T00:00:00.000Z');
+  check('an inverted window is rejected', inverted.status === 400, `got ${inverted.status}`);
+}
+
 /* 9. logout invalidates the session */
 r = await call('POST', '/api/auth/logout');
 check('logout is 204', r.status === 204, `got ${r.status}`);

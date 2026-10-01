@@ -294,6 +294,33 @@ to migrate the same schema.
 so whoever first deploys has to copy it from the dashboard into `backend/.env` or
 a local session cookie will not verify against production.
 
+## Events
+
+`GET /api/events` — a windowed listing, scoped to what the caller may see.
+
+**Visibility.** Events they organise, events they attend, and non-meeting events
+regardless. The alternative — every event in the workspace — would put a
+colleague's one-to-one on a screen it should not appear on. A non-meeting event is
+not private merely because nobody sent an invitation, so the `type` check is a
+deliberate exception rather than an oversight.
+
+**Overlap, not containment.** `startsAt < to AND endsAt > from`, so an event that
+began before the window and runs into it still appears on the day it continues.
+Containment would make a long-running event vanish from the one day it matters.
+
+**`days` is capped and `from`/`to` exist.** The calendar asks for the widest
+window it can, other screens ask for what they need. A `days` parameter alone
+would force every caller to know what the default means.
+
+**`attendeeNames` as well as ids.** Every consumer renders a count or a face, and
+sending names avoids a join per row on the client. `toEventDto` in `dto.ts` also
+coerces `location` to `''`, because every rendering path interpolates it into a
+sentence and `null` there produces "in null".
+
+The tests are mostly about visibility and windows, since that is where a calendar
+fails quietly — a listing one event too long is not an obvious bug on the screen
+that renders it.
+
 ## Search
 
 One endpoint, five entity types, ranked in the database. `src/routes/search.ts`.
