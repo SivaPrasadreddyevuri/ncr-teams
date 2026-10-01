@@ -1,22 +1,40 @@
 # Render blueprint for the API service.
 #
-# The database is NOT declared here. It is a Neon Postgres, created separately,
-# and this service only needs its connection strings -- so nothing in this file
-# can create or destroy a database.
+# The database is NOT declared here. It is an Aiven free PostgreSQL service,
+# created separately, and this service only needs its connection string -- so
+# nothing in this file can create or destroy a database.
+#
+# ## Both URLs are the same value, and that is not a mistake
+#
+# `DATABASE_URL` and `DIRECT_DATABASE_URL` exist because some hosted Postgres
+# providers (Neon, Supabase in pooled mode) put a transaction pooler in front of
+# the database, and DDL cannot run through one. Aiven free Postgres has no pooler,
+# so there is nothing to split: the same direct URI serves both request handling
+# and migrations.
+#
+# Two variables rather than one anyway, so that moving to a pooled host later is
+# a change of value rather than a change of shape.
+#
+# `pgbouncer=true` must NOT be appended here. It tells Prisma that a transaction
+# pooler is in play so it disables prepared statements, and on a direct connection
+# it is simply wrong.
 
 services:
   - type: web
     name: ncr-teams-api
     runtime: node
     plan: free
+    # Matches the database's region, so a query crosses one region rather than
+    # two. Aiven's Singapore region and Render's `singapore` are peers.
     region: singapore
 
     # Build from the repository root, because this is an npm workspace and the
     # Prisma client has to be generated once for the whole tree.
     #
     # `npm ci` at the root installs every workspace, so the API's dependencies
-    # are present even though the Dockerfile equivalent runs in the root
-    # directory.
+    # are present even though the build runs in the root directory. Its
+    # `postinstall` already runs `db:generate`, so the explicit call below is
+    # belt-and-braces rather than load-bearing.
     #
     # The backend build is NOT optional. `start` runs `node dist/server.js`, and
     # dist/ only exists because `tsc -p tsconfig.build.json` writes it. Without
@@ -24,38 +42,49 @@ services:
     # and the service fails its first health check. The frontend build is
     # deliberately absent: it is deployed separately to Vercel, and building it
     # here would only cost time.
+    #
+    # Node comes from .nvmrc (24). Check the build log on the first deploy and
+    # confirm; set NODE_VERSION=24 explicitly if the log shows otherwise.
     buildCommand: npm ci && npm run db:generate && npm run build --workspace backend
     startCommand: npm run start --workspace backend
 
     healthCheckPath: /api/health
-    # A cold start on the free tier compiles nothing (TypeScript is built ahead
-    # of time), so this is generous rather than tuned.
+    # Liveness only, deliberately: it does not touch the database, so a
+    # dependency blip cannot mark a healthy instance down and take it out of
+    # rotation. Check `/api/health/ready` by hand after deploying -- that is the
+    # one that proves the connection string is right.
     autoDeploy: true
 
     # Migrations are NOT run by this blueprint. Render's preDeployCommand is a
     # paid-plan feature, so on `plan: free` the schema has to be applied by hand:
     #
-    #   DATABASE_URL=<direct neon url> DIRECT_DATABASE_URL=<direct neon url> \
-    #     npm run db:deploy
+    #   DATABASE_URL=<aiven uri> npm run db:deploy
     #
-    # Run it from a clone with the two Neon URLs exported. It is deliberately not
+    # Run it from a clone with the Aiven URI exported. It is deliberately not
     # part of buildCommand, because a build runs on every push including from
     # pull requests, and a build should not mutate a database. It is not part of
     # startCommand either, because a free-tier instance restarts often and
     # several of them would race to migrate the same schema.
+    #
+    # Note that Prisma's CLI reads DATABASE_URL for migrations, not
+    # DIRECT_DATABASE_URL. Harmless while the two are the same URI; on a pooled
+    # host, migrations must be run with the *direct* URL in DATABASE_URL.
 
     envVars:
       - key: NODE_ENV
         value: production
 
-      # Pooled connection for request handling. On Neon this is the `-pooler`
-      # host. `pgbouncer=true` tells Prisma the pooler is in transaction mode,
-      # which disables prepared statements -- without it, queries fail on a
-      # pooled endpoint.
+      # The Aiven Service URI, verbatim, including `?sslmode=require`.
+      #
+      # Not committed anywhere, so it has to be pasted in. The password in it may
+      # contain `@`, `:` or `/`, which have to be percent-encoded -- Aiven's
+      # dashboard can regenerate a simpler password if the connection string will
+      # not parse.
       - key: DATABASE_URL
         sync: false
 
-      # Unpooled, for migrations. A transaction pooler cannot run DDL.
+      # Same URI. Kept as a separate variable so the pooled/direct split stays
+      # possible; see the note at the top of this file.
       - key: DIRECT_DATABASE_URL
         sync: false
 
@@ -64,13 +93,13 @@ services:
       # changing it would sign out every user.
       #
       # It is NOT committed to the repository, so the developer who first deploys
-      # must copy the value from the Render dashboard into backend/.env, or a
-      # local session cookie will not verify against production.
+      # must copy the value from the Render dashboard into backend/.env if they
+      # want a local session cookie to verify against production.
       - key: SESSION_PEPPER
         generateValue: true
 
       # Render terminates TLS and forwards one hop. Without this, Express reads
       # the proxy's address as the client's, and the session cookie cannot be
-      # Secure.
+      # Secure -- and config.ts refuses to boot in production without it.
       - key: TRUST_PROXY_HOPS
         value: "1"

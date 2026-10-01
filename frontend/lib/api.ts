@@ -391,6 +391,67 @@ export const api = {
     }>(`/search?${query}`, { signal });
   },
 
+  /* stats */
+  /**
+   * Dashboard and launcher counts, in one round trip.
+   *
+   * Both blocks come from a single response because they are the same query, and
+   * two calls would render four cards and five badges from six table counts.
+   *
+   * `dashboard.messages` is *unread*, not total, and it is computed against each
+   * channel's own read marker -- so it agrees with the sidebar badge by
+   * construction rather than by coincidence.
+   */
+  stats: (signal?: AbortSignal) =>
+    request<{
+      dashboard: { messages: number; meetings: number; mentions: number };
+      apps: {
+        channels: number;
+        events: number;
+        files: number;
+        meetings: number;
+        attendance: number;
+      };
+    }>('/stats', { signal }),
+
+  /* attendance */
+  /**
+   * The caller's own attendance for a window.
+   *
+   * There is no `userId` parameter. An HR board wants to see a whole team, and that
+   * needs a scope rule and its own decision about who may use it -- so it is a
+   * separate endpoint rather than a flag here that looks already built.
+   */
+  attendance: (
+    params: { from?: string; to?: string; days?: number } = {},
+    signal?: AbortSignal,
+  ) => {
+    const query = new URLSearchParams();
+    if (params.from) query.set('from', params.from);
+    if (params.to) query.set('to', params.to);
+    if (params.days) query.set('days', String(params.days));
+    const suffix = query.toString();
+    return request<{
+      records: AttendanceRecordDto[];
+      from: string;
+      to: string;
+      /** The server's thresholds, so the client does not hardcode them. */
+      rules: { lateAfterMinutes: number; overtimeAfterMinutes: number };
+    }>(`/attendance${suffix ? `?${suffix}` : ''}`, { signal });
+  },
+
+  /**
+   * Check in or out for today.
+   *
+   * Sends only which button was pressed. `status` and `overtimeMinutes` are derived
+   * server-side and returned, so a client cannot claim it arrived on time at 23:00.
+   */
+  punch: (action: 'in' | 'out') =>
+    request<{ record: AttendanceRecordDto }>('/attendance/punch', {
+      method: 'POST',
+      body: { action },
+    }),
+
   /* events */
   /**
    * Calendar events in a window.
@@ -431,6 +492,26 @@ export const api = {
       signal,
     });
   },
+};
+
+/**
+ * An attendance record as the API returns it.
+ *
+ * Structurally the fixture's `AttendanceRecord`, and deliberately so: the board
+ * renders it unchanged. The one field that looks redundant -- `date` as a
+ * `YYYY-MM-DD` key rather than a timestamp -- is what lets the component keep
+ * comparing against `localDayKey()`. A full ISO timestamp there would make
+ * `record.date === today` false for every record, and the punch buttons would sit
+ * permanently in the "not checked in" phase with no error to explain it.
+ */
+export type AttendanceRecordDto = {
+  id: string;
+  userId: string;
+  date: string;
+  checkIn: string | null;
+  checkOut: string | null;
+  status: 'PRESENT' | 'LATE' | 'REMOTE' | 'ABSENT' | 'HALF_DAY';
+  overtimeMinutes: number;
 };
 
 /** A calendar event as the API returns it. Replaces the fixture's CalendarEvent. */

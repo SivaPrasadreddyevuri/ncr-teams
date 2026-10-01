@@ -34,6 +34,7 @@ import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { sendJson } from '../serialise.js';
+import { APP_TIME_ZONE } from '../app-time.js';
 import { requireAuth } from '../middleware/session.js';
 
 export type SearchScope = 'people' | 'messages' | 'files' | 'events' | 'teams';
@@ -198,7 +199,7 @@ function rankedUnion(userId: string, term: string) {
       e."id",
       e."title" AS title,
       coalesce(e."location", 'No location') AS detail,
-      to_char(e."startsAt" AT TIME ZONE 'Asia/Kolkata', 'Dy, DD Mon') AS context,
+      to_char(e."startsAt" AT TIME ZONE ${APP_TIME_ZONE}, 'Dy, DD Mon') AS context,
       '/calendar'::text,
       NULL::text,
       e."startsAt",

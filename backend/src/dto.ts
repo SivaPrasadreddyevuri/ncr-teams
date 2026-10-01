@@ -1,3 +1,4 @@
+import { dateColumnToDayKey } from './app-time.js';
 /**
  * Response shapes shared with the frontend.
  *
@@ -232,9 +233,50 @@ export function toEventDto(row: EventRow): CalendarEventDto {
     // lets a caller render "Priya, Alex and Tom" without a second request.
     attendeeIds: row.attendees.map((a) => a.user.id),
     attendeeNames: row.attendees.map((a) => a.user.name),
-    meetingId: row.meetingId,
-    // Non-nullable in the response because every rendering path interpolates it
-    // into a sentence, and `null` there produces "in null".
-    location: row.location ?? '',
+      meetingId: row.meetingId,
+      // Non-nullable in the response because every rendering path interpolates it
+      // into a sentence, and `null` there produces "in null".
+      location: row.location ?? '',
+    };
+  }
+
+export type AttendanceDto = {
+  id: string;
+  userId: string;
+  /**
+   * `YYYY-MM-DD` in the app timezone, not an ISO timestamp.
+   *
+   * The fixture used a day key and the UI compares against `localDayKey()`, so
+   * sending a full timestamp would make `record.date === today` fail for every
+   * record and quietly empty the punch buttons.
+   */
+  date: string;
+  checkIn: string | null;
+  checkOut: string | null;
+  status: 'PRESENT' | 'LATE' | 'REMOTE' | 'ABSENT' | 'HALF_DAY';
+  overtimeMinutes: number;
+};
+
+type AttendanceRow = {
+  id: string;
+  userId: string;
+  date: Date;
+  checkIn: Date | null;
+  checkOut: Date | null;
+  status: 'PRESENT' | 'LATE' | 'REMOTE' | 'ABSENT' | 'HALF_DAY';
+  overtimeMinutes: number;
+};
+
+export function toAttendanceDto(row: AttendanceRow): AttendanceDto {
+  return {
+    id: row.id,
+    userId: row.userId,
+    // Prisma reads a `@db.Date` as UTC midnight, so the ISO slice is the stored day
+    // rather than a local-timezone conversion that could shift it by one.
+    date: dateColumnToDayKey(row.date),
+    checkIn: row.checkIn ? row.checkIn.toISOString() : null,
+    checkOut: row.checkOut ? row.checkOut.toISOString() : null,
+    status: row.status,
+    overtimeMinutes: row.overtimeMinutes,
   };
 }

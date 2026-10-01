@@ -19,6 +19,7 @@ import {
   type LeaveRequest,
   type Person,
 } from '@/lib/data';
+import { api } from '@/lib/api';
 import { readJson, storageKeys, writeJson } from '@/lib/storage';
 import { localDayKey } from '@/lib/format';
 
@@ -64,6 +65,16 @@ type WorkspaceValue = WorkspaceState & {
   punchIn: () => void;
   punchOut: () => void;
 
+  /**
+   * Why the last punch could not be saved, or null.
+   *
+   * A punch still updates the screen when the API is unreachable -- the local rule
+   * below computes it -- but that record is not persisted anywhere. Without this the
+   * board would show a check-in that exists only in one tab, which is worse than
+   * showing nothing.
+   */
+  attendanceError: string | null;
+
   addFiles: (rows: FileRow[]) => void;
   removeFile: (id: string) => void;
   toggleFileStar: (id: string) => void;
@@ -91,16 +102,59 @@ function minutesOfDay(iso: string): number {
 export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<WorkspaceState>(seedState);
   const [ready, setReady] = useState(false);
+  const [attendanceError, setAttendanceError] = useState<string | null>(null);
 
   useEffect(() => {
     const session = readJson<Session>(storageKeys.session);
-    setState({
+    const restored = {
       activeUserId: session?.activeUserId ?? currentUser.id,
       leaveRequests: readJson<LeaveRequest[]>(storageKeys.leave) ?? leaveSeed,
       attendance: readJson<AttendanceRecord[]>(storageKeys.attendance) ?? attendanceSeed,
       files: readJson<FileRow[]>(storageKeys.files) ?? fileSeed,
-    });
+    };
+    setState(restored);
     setReady(true);
+
+    /**
+     * Replace the signed-in person's records with the API's.
+     *
+     * Merged rather than replaced wholesale, and that is not a nicety. The persona
+     * picker lets a viewer switch to another seeded person, and that switch is a
+     * demo affordance with no corresponding session -- the API only ever returns the
+     * real cookie holder's rows. Replacing the array would empty the history the
+     * moment someone switched persona, which is most of what the board shows.
+     *
+     * So the session user's rows are overwritten from the server and everyone
+     * else's are left alone. `sessionUserId` is resolved once, before the fetch, so
+     * a persona switch mid-flight cannot merge the wrong person's records.
+     */
+    const sessionUserId = restored.activeUserId;
+    let cancelled = false;
+
+    void api
+      .attendance({ days: 90 })
+      .then((response) => {
+        if (cancelled) return;
+
+        const others = restored.attendance.filter((row) => row.userId !== sessionUserId);
+        const mine = response.records.filter((row) => row.userId === sessionUserId);
+
+        setState((current) => ({
+          ...current,
+          attendance: [...mine, ...others],
+        }));
+      })
+      .catch(() => {
+        // The fixtures are already in state. A down API must not clear the board,
+        // and the `stale` idea is not surfaced here on purpose: attendance is
+        // written by the user rather than read for information, so a stale history
+        // is less alarming than a stale feed. The punch error below is the signal
+        // that matters.
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -142,7 +196,16 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
-  const punchIn = useCallback(() => {
+  /**
+   * Applies the local rule to today's row.
+   *
+   * This is the fallback, not the primary path -- the server owns the thresholds now
+   * and its record replaces this one when the request succeeds. It stays because a
+   * punch is the one interaction a user will retry until something visible happens,
+   * and refusing it because the API is down is a worse product than a record that
+   * is briefly local.
+   */
+  const applyLocalRule = useCallback((action: 'in' | 'out') => {
     const date = localDayKey(new Date());
     const at = new Date().toISOString();
 
@@ -154,23 +217,35 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       // Update in place rather than deleting and recreating. The previous
       // implementation rebuilt the row, which discarded `overtimeMinutes` and
       // moved the record to the top of the history.
-      const next: AttendanceRecord = existing
-        ? {
-            ...existing,
-            checkIn: at,
-            checkOut: null,
-            overtimeMinutes: 0,
-            status: minutesOfDay(at) > LATE_AFTER_MINUTES ? 'LATE' : 'PRESENT',
-          }
-        : {
-            id: `at-${current.activeUserId}-${date}`,
-            userId: current.activeUserId,
-            date,
-            checkIn: at,
-            checkOut: null,
-            status: minutesOfDay(at) > LATE_AFTER_MINUTES ? 'LATE' : 'PRESENT',
-            overtimeMinutes: 0,
-          };
+      const next: AttendanceRecord =
+        action === 'in'
+          ? existing
+            ? {
+                ...existing,
+                checkIn: at,
+                checkOut: null,
+                overtimeMinutes: 0,
+                status: minutesOfDay(at) > LATE_AFTER_MINUTES ? 'LATE' : 'PRESENT',
+              }
+            : {
+                id: `at-${current.activeUserId}-${date}`,
+                userId: current.activeUserId,
+                date,
+                checkIn: at,
+                checkOut: null,
+                status: minutesOfDay(at) > LATE_AFTER_MINUTES ? 'LATE' : 'PRESENT',
+                overtimeMinutes: 0,
+              }
+          : // Nothing to check out of: not checked in today.
+            !existing?.checkIn
+            ? existing ?? ({} as AttendanceRecord)
+            : {
+                ...existing,
+                checkOut: at,
+                overtimeMinutes: Math.max(0, minutesOfDay(at) - OVERTIME_AFTER_MINUTES),
+              };
+
+      if (action === 'out' && !existing?.checkIn) return current;
 
       return {
         ...current,
@@ -184,31 +259,48 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const punchOut = useCallback(() => {
-    const date = localDayKey(new Date());
-    const at = new Date().toISOString();
+  /**
+   * Sends a punch and adopts the server's record.
+   *
+   * Optimistic, then reconciled rather than rolled back: the local row goes in
+   * immediately so the button responds, then the server's version replaces it. The
+   * server's status is the one that wins, because it applied the threshold in the
+   * app timezone rather than the browser's -- which is a different answer whenever
+   * the two zones disagree about the day.
+   *
+   * A failure leaves the local row in place and surfaces `attendanceError`, so the
+   * record on screen is visibly unpersisted rather than silently lost.
+   */
+  const sendPunch = useCallback((action: 'in' | 'out') => {
+    applyLocalRule(action);
+    setAttendanceError(null);
 
-    setState((current) => {
-      const existing = current.attendance.find(
-        (record) => record.userId === current.activeUserId && record.date === date,
-      );
+    void api
+      .punch(action)
+      .then(({ record }) => {
+        setState((current) => ({
+          ...current,
+          attendance: [
+            ...current.attendance.filter(
+              (row) => !(row.userId === record.userId && row.date === record.date),
+            ),
+            record,
+          ],
+        }));
+      })
+      .catch((error: unknown) => {
+        setAttendanceError(
+          action === 'in'
+            ? 'Could not save your check-in. The time shown is only on this device.'
+            : 'Could not save your check-out. The time shown is only on this device.',
+        );
+        void error;
+      });
+  }, [applyLocalRule]);
 
-      // Nothing to check out of: not checked in today.
-      if (!existing?.checkIn) return current;
+  const punchIn = useCallback(() => sendPunch('in'), [sendPunch]);
+  const punchOut = useCallback(() => sendPunch('out'), [sendPunch]);
 
-      const workedTo = minutesOfDay(at);
-      const overtimeMinutes = Math.max(0, workedTo - OVERTIME_AFTER_MINUTES);
-
-      return {
-        ...current,
-        attendance: current.attendance.map((record) =>
-          record.userId === current.activeUserId && record.date === date
-            ? { ...record, checkOut: at, overtimeMinutes }
-            : record,
-        ),
-      };
-    });
-  }, []);
 
   const addFiles = useCallback((rows: FileRow[]) => {
     if (rows.length === 0) return;
@@ -239,15 +331,16 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       people: directory,
       signIn,
       signOut,
-      addLeave,
-      decideLeave,
-      punchIn,
-      punchOut,
-      addFiles,
-      removeFile,
-      toggleFileStar,
-    }),
-    [
+          addLeave,
+          decideLeave,
+          punchIn,
+          punchOut,
+          attendanceError,
+          addFiles,
+          removeFile,
+          toggleFileStar,
+        }),
+        [
       state,
       ready,
       activeUser,

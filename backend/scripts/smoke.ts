@@ -345,6 +345,60 @@ if (fileId) {
   check('an inverted window is rejected', inverted.status === 400, `got ${inverted.status}`);
 }
 
+/* 8e. Stats and attendance.
+
+   Two endpoints that exist only to feed the dashboard, so nothing else in this
+   script would notice if they broke. */
+{
+  const stats = await call('GET', '/api/stats');
+  check('stats return 200', stats.status === 200, `got ${stats.status}`);
+  const statsBody = stats.json as {
+    dashboard?: Record<string, number>;
+    apps?: Record<string, number>;
+  };
+  check(
+    'stats return a dashboard block of whole numbers',
+    statsBody.dashboard !== undefined &&
+      Object.values(statsBody.dashboard).every((n) => Number.isInteger(n) && n >= 0),
+    `dashboard: ${JSON.stringify(statsBody.dashboard)}`,
+  );
+  check(
+    'stats return an apps block of whole numbers',
+    statsBody.apps !== undefined &&
+      Object.values(statsBody.apps).every((n) => Number.isInteger(n) && n >= 0),
+    `apps: ${JSON.stringify(statsBody.apps)}`,
+  );
+
+  const attendance = await call('GET', '/api/attendance?days=30');
+  check('attendance returns 200', attendance.status === 200, `got ${attendance.status}`);
+  const attendanceBody = attendance.json as {
+    records?: Array<{ userId: string; date: string }>;
+    rules?: { lateAfterMinutes: number; overtimeAfterMinutes: number };
+  };
+  check(
+    'attendance returns only the caller\'s records',
+    (attendanceBody.records ?? []).every((r) => r.userId === 'u1'),
+    `userIds: ${JSON.stringify((attendanceBody.records ?? []).map((r) => r.userId))}`,
+  );
+  check(
+    'attendance dates are day keys, not timestamps',
+    (attendanceBody.records ?? []).every((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date)),
+    `dates: ${JSON.stringify((attendanceBody.records ?? []).map((r) => r.date))}`,
+  );
+  check(
+    'attendance publishes its thresholds',
+    typeof attendanceBody.rules?.lateAfterMinutes === 'number' &&
+      typeof attendanceBody.rules?.overtimeAfterMinutes === 'number',
+    `rules: ${JSON.stringify(attendanceBody.rules)}`,
+  );
+
+  // Checking out with no check-in is the one punch that can be tested without
+  // writing a row. Checking in would leave today's record behind and change what
+  // the count checks in db:verify see.
+  const badPunch = await call('POST', '/api/attendance/punch', { action: 'sideways' });
+  check('an unknown punch action is rejected', badPunch.status === 400, `got ${badPunch.status}`);
+}
+
 /* 9. logout invalidates the session */
 r = await call('POST', '/api/auth/logout');
 check('logout is 204', r.status === 204, `got ${r.status}`);

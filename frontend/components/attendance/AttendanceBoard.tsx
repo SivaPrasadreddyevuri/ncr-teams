@@ -34,9 +34,9 @@ function phaseOf(record: AttendanceRecord | undefined): Phase {
 
 export function AttendanceBoard() {
   // Read from the store so a check-in survives navigating away and reloading.
-  // This board used to hold its own copy, and said so in the UI: "Kept in this
-  // session only".
-  const { attendance, punchIn, punchOut, activeUserId } = useWorkspace();
+  // The records themselves now come from `GET /api/attendance`, and the store
+  // reconciles a punch with the server's record once it answers.
+  const { attendance, punchIn, punchOut, activeUserId, attendanceError } = useWorkspace();
   const people = useDirectory();
   const today = localDayKey(new Date());
 
@@ -67,6 +67,18 @@ export function AttendanceBoard() {
   return (
     <div className="grid-2">
       <SectionCard title="My Attendance">
+        {/* Shown only when a punch failed. The times below are still displayed,
+            because the local rule computed them and hiding them would look like the
+            punch never registered -- but they exist only in this tab, and saying so
+            is the honest rendering. */}
+        {attendanceError && (
+          <p
+            style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 12px' }}
+            role="status"
+          >
+            {attendanceError}
+          </p>
+        )}
         <div className="profile-facts" style={{ marginBottom: 14 }}>
           <span>Status</span>
           <strong>{status ?? 'Not checked in'}</strong>

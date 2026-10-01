@@ -294,6 +294,54 @@ to migrate the same schema.
 so whoever first deploys has to copy it from the dashboard into `backend/.env` or
 a local session cookie will not verify against production.
 
+## Stats
+
+`GET /api/stats` — the dashboard's four numbers and the launcher's five, in one
+statement.
+
+Six tables, one round trip: on a free-tier instance with the database in another
+region, six queries would spend the whole page-load budget on latency alone. Scalar
+subqueries over two shared CTEs, which also means the six counts observe one
+snapshot — six separate queries can see six different states, so a dashboard can
+briefly show a pending request the leave list has already dropped.
+
+**`dashboard.messages` is unread, not total**, computed against each channel's own
+`ChannelReadState` marker — the same query as the sidebar badge, so the dashboard and
+the channel list cannot disagree. A single global timestamp would be easier and
+would mark every channel read the moment one is opened.
+
+Files are workspace-wide (matching `GET /api/files`); messages, meetings, mentions
+and attendance are the caller's.
+
+## Attendance
+
+`GET /api/attendance` and `POST /api/attendance/punch`.
+
+**The thresholds are the server's.** `LATE_AFTER_MINUTES` (09:30) and
+`OVERTIME_AFTER_MINUTES` (17:00) live here, the client sends only which button was
+pressed, and `status` / `overtimeMinutes` are computed and stored server-side. The
+browser is where attendance is most worth faking, and the rules used to be duplicated
+in the client. They are still in `WorkspaceProvider.tsx` — but only as the
+fallback applied when the API is unreachable, which sets `attendanceError` so the
+board can say the time is only on this device.
+
+**"Today" is the app zone's today.** `Attendance.date` is a `date` column, and
+Render runs in UTC, so `toISOString().slice(0, 10)` would file an 02:00 IST punch
+under the previous day for six and a half hours out of every twenty-four. Every
+boundary goes through `appDayKey` in `src/app-time.ts`.
+
+That module is the third copy of the zone logic, after `database/lib/app-time.ts`
+and `frontend/lib/format.ts`. All three are separate workspaces with their own
+`rootDir`, so a cross-workspace import would fail to typecheck or emit outside
+`dist`. `appDayKey` has a test pinning the zone against known UTC instants.
+
+**No `userId` parameter.** One person's records, always. An HR board wants a whole
+team, and that needs a scope rule and a decision about who may use it — a separate
+endpoint, not a flag here that would look already built.
+
+**The day is derived, not accepted.** A punch that sends `date` or `status` has
+both ignored; there is a test for exactly that.
+
 ## Events
 
 `GET /api/events` — a windowed listing, scoped to what the caller may see.
