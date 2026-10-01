@@ -10,7 +10,7 @@
                    ],
     "scripts":  {
                     "dev":  "npm run dev --workspace frontend",
-                    "dev:api":  "npm run dev --workspace backend",
+                    "dev:api":  "npm run db:generate && npm run dev --workspace backend",
                     "build":  "npm run build --workspace frontend",
                     "start":  "npm run start --workspace frontend",
                     "preview":  "npm run build --workspace frontend \u0026\u0026 npm run start --workspace frontend",
@@ -19,7 +19,6 @@
                     "demo:signin":  "npm run demo:signin --workspace backend",
                     "demo:files":  "npm run demo:files --workspace backend",
                     "smoke":  "npm run smoke --workspace backend",
-                    "postinstall":  "npm run db:generate",
                     "db:generate":  "npm run generate --workspace database",
                     "db:validate":  "npm run validate --workspace database",
                     "db:migrate":  "npm run migrate --workspace database",
