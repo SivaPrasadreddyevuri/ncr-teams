@@ -206,6 +206,22 @@ export type ChatMessage = {
   attachments: Array<{ id: string; name: string; size: number; type: string }>;
   deleted: boolean;
   editedAt: string | null;
+  /**
+   * The message this one replies to, or null.
+   *
+   * Replies render inline rather than in a side panel, so the parent travels with
+   * the message: rendering "Replying to Sarah" needs no second request per reply on
+   * screen.
+   */
+  parentId: string | null;
+  /**
+   * The parent's author name, resolved server-side. Null when there is no parent.
+   *
+   * Kept when the parent is deleted: the reply genuinely was in reply to something
+   * that person wrote, so attributing it is correct. The UI shows the parent as
+   * deleted text, as Discord and Slack do.
+   */
+  parentAuthor: string | null;
 };
 
 export type FileRow = {

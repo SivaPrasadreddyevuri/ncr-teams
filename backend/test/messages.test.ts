@@ -25,6 +25,9 @@ type MessageDto = {
   attachments: Array<{ id: string; name: string; size: number; type: string }>;
   deleted: boolean;
   editedAt: string | null;
+  parentId: string | null;
+  /** Null when the parent is gone, which is not the same as "Unknown". */
+  parentAuthor: string | null;
 };
 
 type ErrorBody = { error: { code: string; message: string } };
@@ -298,6 +301,190 @@ describe('POST /api/messages', () => {
       userId: 'u7',
     });
     assert.equal(response.status, 400);
+  });
+});
+
+describe('reply context', () => {
+  /**
+   * Created rows are hard-deleted in `after`.
+   *
+   * These post into `c1`, and `read.test.ts` runs later against the same database
+   * asserting that `c1`'s newest message is a specific seeded row. A row left
+   * behind here is newer than all of them, so the failure surfaces in a different
+   * file pointing at something unrelated. See the same note on the edit suite.
+   *
+   * An `after` rather than a delete at the end of each test, because a test that
+   * throws before reaching its cleanup would otherwise leave the mess behind --
+   * which is exactly the failure mode being defended against.
+   */
+  const created: string[] = [];
+
+  after(async () => {
+    await prisma.message.deleteMany({ where: { id: { in: created } } });
+  });
+
+  async function post(body: string, parentId?: string): Promise<MessageDto> {
+    const { message } = await client.postJson<{ message: MessageDto }>('/api/messages', {
+      channelId: 'c1',
+      body,
+      ...(parentId ? { parentId } : {}),
+    });
+    created.push(message.id);
+    return message;
+  }
+
+  it('carries the parent id and the parent\'s name on a reply', async () => {
+    // Resolved server-side in the same query as the message. A client that had to
+    // look up "who is m2" would need one request per reply on screen.
+    const reply = await post('replying inline', 'm2');
+
+    assert.equal(reply.parentId, 'm2');
+    assert.equal(reply.parentAuthor, 'Alex Johnson', 'm2 is authored by u1');
+  });
+
+  it('reports no parent for an ordinary message', async () => {
+    const message = await post('not a reply');
+
+    assert.equal(message.parentId, null);
+    assert.equal(message.parentAuthor, null);
+  });
+
+  it('keeps the attribution when the parent has been deleted', async () => {
+    // Deleting a message must not orphan its replies, and the reply still points at
+    // something Sarah wrote -- so the attribution stays. Discord and Slack do the
+    // same, showing the parent as deleted text and keeping its author.
+    const parent = await prisma.message.create({
+      data: {
+        id: 'reply-probe-parent',
+        body: 'about to be deleted',
+        userId: 'u2',
+        channelId: 'c1',
+      },
+    });
+    const reply = await prisma.message.create({
+      data: {
+        id: 'reply-probe-child',
+        body: 'a reply to the above',
+        userId: 'u1',
+        channelId: 'c1',
+        parentId: parent.id,
+      },
+    });
+
+    try {
+      await prisma.message.update({
+        where: { id: parent.id },
+        data: { deletedAt: new Date(), body: '' },
+      });
+
+      const body = await client.getJson<{ messages: MessageDto[] }>('/api/messages?channelId=c1&limit=100');
+      const row = body.messages.find((m) => m.id === reply.id);
+
+      assert.ok(row, 'the reply must survive its parent being deleted');
+      assert.equal(row.parentId, parent.id, 'the link is kept, so thread position holds');
+      assert.equal(row.parentAuthor, 'Sarah Johnson', 'the parent was still hers to write');
+    } finally {
+      await prisma.message.deleteMany({ where: { id: { in: [parent.id, reply.id] } } });
+    }
+  });
+});
+
+describe('PATCH /api/messages/:id', () => {
+  /**
+   * Every message these tests create is recorded here and hard-deleted in `after`.
+   *
+   * Not a nicety. These tests post into `c1`, and `read.test.ts` runs later in the
+   * same database and asserts that `c1`'s newest message is a specific seeded row.
+   * A message left behind here is newer than all of them, so the failure lands in a
+   * different file pointing at something that has nothing to do with editing.
+   *
+   * A hard delete rather than the API's soft one, because the soft version keeps
+   * the row and a tombstone is still a row.
+   */
+  const created: string[] = [];
+
+  after(async () => {
+    await prisma.message.deleteMany({ where: { id: { in: created } } });
+  });
+
+  /** A message owned by `client` (u1), for the author cases. */
+  async function mine(): Promise<MessageDto> {
+    const created_ = await client.postJson<{ message: MessageDto }>('/api/messages', {
+      channelId: 'c1',
+      body: 'original text',
+    });
+    created.push(created_.message.id);
+    return created_.message;
+  }
+
+  it('edits the body and stamps editedAt', async () => {
+    const message = await mine();
+    const response = await client.patch('/api/messages/' + message.id, { body: '  corrected text  ' });
+    assert.equal(response.status, 200);
+
+    const { message: edited } = await readJson<{ message: MessageDto }>(response);
+    assert.equal(edited.body, 'corrected text', 'the body is trimmed on the way in');
+    assert.ok(edited.editedAt, 'editedAt should be set by an edit');
+    assert.equal(edited.id, message.id, 'the id does not change on an edit');
+  });
+
+  it('publishes message.updated so other clients see the edit', async () => {
+    const message = await mine();
+    const events: RealtimeEvent[] = [];
+    const unsubscribe = subscribe((event) => events.push(event));
+
+    try {
+      await client.patch('/api/messages/' + message.id, { body: 'edited for broadcast' });
+      const published = events.find((e) => e.type === 'message.updated');
+      assert.ok(published, 'an edit should broadcast, or nobody else sees it');
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("refuses to edit somebody else's message", async () => {
+    // m1 is u2's. Author-only, not role-based, for the same reason delete is.
+    const response = await client.patch('/api/messages/m1', { body: 'not mine to change' });
+    assert.equal(response.status, 403);
+  });
+
+  it('refuses to edit a deleted message', async () => {
+    // Editing a tombstone would put text back into a thread where the original is
+    // deliberately unreadable.
+    const message = await mine();
+    await client.delete('/api/messages/' + message.id);
+
+    const response = await client.patch('/api/messages/' + message.id, { body: 'back from the dead' });
+    assert.equal(response.status, 400);
+    assert.equal((await readJson<ErrorBody>(response)).error.code, 'message_deleted');
+  });
+
+  it('rejects an empty or whitespace-only edit', async () => {
+    // Unlike create -- where a message may be attachments only -- an edit that
+    // empties the text would leave an attachment nobody can describe.
+    const message = await mine();
+    const blank = await client.patch('/api/messages/' + message.id, { body: '   ' });
+    assert.equal(blank.status, 400, 'the schema rejects an empty string');
+
+    const missing = await client.patch('/api/messages/' + message.id, {});
+    assert.equal(missing.status, 400, 'and body is required');
+  });
+
+  it('rejects an over-long edit', async () => {
+    const message = await mine();
+    const response = await client.patch('/api/messages/' + message.id, { body: 'x'.repeat(4001) });
+    assert.equal(response.status, 400);
+  });
+
+  it('returns 404 for an unknown message', async () => {
+    const response = await client.patch('/api/messages/nope', { body: 'hello' });
+    assert.equal(response.status, 404);
+  });
+
+  it('requires a session', async () => {
+    const message = await mine();
+    const response = await harness.client().patch('/api/messages/' + message.id, { body: 'anon' });
+    assert.equal(response.status, 401);
   });
 });
 

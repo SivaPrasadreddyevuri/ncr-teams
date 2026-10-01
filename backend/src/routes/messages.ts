@@ -27,7 +27,13 @@ const listQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
-/** The select that keeps every message response identical in shape. */
+/**
+ * The select that keeps every message response identical in shape.
+ *
+ * `parent` is joined rather than left out: a reply renders "Replying to Sarah" and
+ * resolving that per message would be one query per row on screen. It is a single
+ * join on the primary key, so the planner folds it into the same scan.
+ */
 const messageSelect = {
   id: true,
   channelId: true,
@@ -36,6 +42,8 @@ const messageSelect = {
   createdAt: true,
   editedAt: true,
   deletedAt: true,
+  parentId: true,
+  parent: { select: { userId: true, user: { select: { name: true } } } },
   reactions: { select: { emoji: true, userId: true } },
   attachments: { select: { id: true, name: true, sizeBytes: true, mimeType: true } },
 } as const;
@@ -202,6 +210,58 @@ export function messagesRouter() {
     publish({ type: 'message.created', channelId: body.channelId, message: dto });
 
     sendJson(res, 201, { message: dto });
+  });
+
+  /**
+   * Edit, author only.
+   *
+   * The `editedAt` column and the `message.updated` broadcast both already existed
+   * with nothing writing or reading them; this is the missing half rather than a new
+   * feature.
+   *
+   * **No history.** The edit overwrites the body and a timestamp is all that
+   * survives. That is a deliberate limit for a showcase: an edit history needs its
+   * own table and a view, and a half-built one is worse than an honest "edited".
+   */
+  router.patch('/:id', async (req, res) => {
+    const { id } = z.object({ id: z.string().min(1).max(64) }).parse(req.params);
+    const { body } = z
+      .object({
+        // Non-empty, unlike create. A message may be created with only an
+        // attachment, but an edit that empties the text would leave an attachment
+        // the author can no longer describe -- and there is no delete-the-edit path.
+        body: z.string().min(1).max(4000),
+      })
+      .parse(req.body);
+
+    const message = await prisma.message.findUnique({
+      where: { id },
+      select: { id: true, channelId: true, userId: true, deletedAt: true },
+    });
+    if (!message) throw notFound('No such message.');
+
+    if (message.userId !== req.user!.id) {
+      throw forbidden('You can only edit your own messages.');
+    }
+
+    // Editing a tombstone would resurrect content in a thread where the original
+    // is deliberately unreadable.
+    if (message.deletedAt) throw badRequest('message_deleted', 'This message was deleted.');
+
+    const trimmed = body.trim();
+    if (!trimmed) throw badRequest('empty_body', 'An edited message cannot be empty.');
+
+    const row = await prisma.message.update({
+      where: { id },
+      data: { body: trimmed, editedAt: new Date() },
+      select: messageSelect,
+    });
+
+    if (message.channelId) {
+      publish({ type: 'message.updated', channelId: message.channelId, message: toMessageDto(row) });
+    }
+
+    sendJson(res, 200, { message: toMessageDto(row) });
   });
 
   /** Adds a reaction, or removes it if the caller already gave that one. */

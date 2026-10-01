@@ -272,6 +272,83 @@ describe('list', () => {
     assert.equal(folder?.folder, true);
     assert.equal(folder?.uploaded, false);
   });
+
+  it('filters by channel, which is what the chat Files tab reads', { timeout: 30_000 }, async () => {
+    // The reason this filter exists: a file's channel is set at upload and its
+    // message when attached, so "what was shared here" was a column the listing
+    // could not ask about.
+    const inC1 = await prisma.file.create({
+      data: {
+        id: 'chan-c1-file',
+        name: 'shared-in-c1.txt',
+        mimeType: 'text/plain',
+        sizeBytes: 2n,
+        storageKey: 'uploads/test/c1',
+        content: Buffer.from('hi'),
+        uploadedById: 'u1',
+        channelId: 'c1',
+      },
+      select: { id: true },
+    });
+    const inC2 = await prisma.file.create({
+      data: {
+        id: 'chan-c2-file',
+        name: 'shared-in-c2.txt',
+        mimeType: 'text/plain',
+        sizeBytes: 2n,
+        storageKey: 'uploads/test/c2',
+        content: Buffer.from('hi'),
+        uploadedById: 'u1',
+        channelId: 'c2',
+      },
+      select: { id: true },
+    });
+
+    try {
+      const { files } = await client.getJson<{ files: FileDto[] }>('/api/files?channelId=c1');
+      const ids = files.map((f) => f.id);
+
+      assert.ok(ids.includes(inC1.id), 'the file uploaded to c1 should be listed');
+      assert.ok(!ids.includes(inC2.id), 'and the one uploaded to c2 should not');
+    } finally {
+      await prisma.file.deleteMany({ where: { id: { in: [inC1.id, inC2.id] } } });
+    }
+  });
+
+  it('returns only root-of-channel files, not the ones inside a folder', { timeout: 30_000 }, async () => {
+    // A file is either at the root of a channel or inside a folder, never both, so
+    // `folderId: null` has to keep applying when channelId is given. Dropping it
+    // would silently return every file in the workspace.
+    const nested = await prisma.file.create({
+      data: {
+        id: 'chan-nested-file',
+        name: 'inside-a-folder.txt',
+        mimeType: 'text/plain',
+        sizeBytes: 2n,
+        storageKey: 'uploads/test/nested',
+        content: Buffer.from('hi'),
+        uploadedById: 'u1',
+        channelId: 'c1',
+        folderId: 'f1',
+      },
+      select: { id: true },
+    });
+
+    try {
+      const { files } = await client.getJson<{ files: FileDto[] }>('/api/files?channelId=c1');
+      assert.ok(
+        !files.some((f) => f.id === nested.id),
+        'a file inside a folder is reachable through its folder, not the channel root',
+      );
+    } finally {
+      await prisma.file.delete({ where: { id: nested.id } });
+    }
+  });
+
+  it('rejects a malformed channelId', { timeout: 30_000 }, async () => {
+    const response = await client.get(`/api/files?channelId=${'x'.repeat(200)}`);
+    assert.equal(response.status, 400);
+  });
 });
 
 describe('star', () => {

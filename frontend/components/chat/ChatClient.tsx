@@ -22,6 +22,11 @@ const THREADS: Array<{ id: Thread; label: string }> = [
  *
  * Used when there is no session, so the composer still responds. The id is
  * marked as local and never sent, so it cannot collide with a real one.
+ *
+ * `deleted: false` and `editedAt: null` are stated rather than omitted because
+ * `ChatMessage` is the API's type (see the note in lib/data.ts) and those fields
+ * are what tell the renderer a message is a tombstone or has been edited. An
+ * optimistic message that left them undefined would not render as sent.
  */
 function localEcho(authorId: string, channelId: string, body: string): ChatMessage {
   return {
@@ -32,6 +37,10 @@ function localEcho(authorId: string, channelId: string, body: string): ChatMessa
     createdAt: new Date().toISOString(),
     reactions: [],
     attachments: [],
+    deleted: false,
+    editedAt: null,
+    parentId: null,
+    parentAuthor: null,
   };
 }
 

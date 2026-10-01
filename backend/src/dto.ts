@@ -75,6 +75,23 @@ export type MessageDto = {
   /** Set once a message has been soft deleted, so the UI can show a tombstone. */
   deleted: boolean;
   editedAt: string | null;
+  /**
+   * The message this one replies to, or null.
+   *
+   * Replies render inline in the channel rather than in a side panel, so the
+   * context has to travel with the message: "Replying to Sarah" with no way to
+   * render it would need a second request per reply on screen.
+   */
+  parentId: string | null;
+  /**
+   * The parent's author name, already resolved.
+   *
+   * Null only when there is no parent, or when the caller did not join it. A
+   * soft-deleted parent still has an author, and naming them is right: the reply
+   * genuinely was in reply to something they wrote. Discord and Slack both keep the
+   * attribution and show the parent as deleted text.
+   */
+  parentAuthor: string | null;
 };
 
 /** Mirrors `FileRow` in data.ts, plus the fields the API adds. */
@@ -128,6 +145,19 @@ type MessageRow = {
   createdAt: Date;
   editedAt: Date | null;
   deletedAt: Date | null;
+  parentId: string | null;
+  /**
+   * The parent, joined in by the caller.
+   *
+   * Optional rather than required so selects that do not need reply context keep
+   * compiling; the routes that render a thread include it and the ones that do not
+   * leave it undefined, which renders as "no reply context" rather than a crash.
+   *
+   * The author's *name* is selected rather than just their id, so a page of fifty
+   * messages resolves every "Replying to ..." in the same query instead of one per
+   * reply on screen.
+   */
+  parent?: { userId: string; user: { name: string } } | null;
   reactions: Array<{ emoji: string; userId: string }>;
   attachments: Array<{ id: string; name: string; sizeBytes: bigint; mimeType: string }>;
 };
@@ -161,6 +191,11 @@ export function toMessageDto(row: MessageRow): MessageDto {
     })),
     deleted: row.deletedAt !== null,
     editedAt: row.editedAt ? row.editedAt.toISOString() : null,
+    parentId: row.parentId ?? null,
+    // Null rather than "Unknown": absent is the honest rendering, and the parent
+    // author is only absent when there is no parent. `parent` is undefined when the
+    // caller did not join it, which is the same rendering as a missing parent.
+    parentAuthor: row.parent?.user.name ?? null,
   };
 }
 

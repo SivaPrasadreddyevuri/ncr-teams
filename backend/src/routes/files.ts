@@ -73,6 +73,15 @@ export function filesRouter() {
       .object({
         folderId: z.string().min(1).max(64).optional(),
         team: z.string().min(1).max(120).optional(),
+        /**
+         * Files shared into one channel.
+         *
+         * This is what the chat sidebar's Files tab reads. It exists because there
+         * was no other way to ask the question: a file's channel is set at upload
+         * and its message is set when it is attached, so "what was shared here" is a
+         * column the listing could not filter on.
+         */
+        channelId: z.string().min(1).max(64).optional(),
         /** Include soft-deleted rows. Off by default. */
         includeDeleted: z.coerce.boolean().default(false),
       })
@@ -81,7 +90,11 @@ export function filesRouter() {
     const rows = await prisma.file.findMany({
       where: {
         deletedAt: query.includeDeleted ? { not: null } : null,
+        // Exactly one of these is meaningful at a time -- a file is either at the
+        // root of a channel or inside a folder -- so `folderId ?? null` keeps the
+        // root-of-channel case working rather than silently returning everything.
         folderId: query.folderId ?? null,
+        ...(query.channelId ? { channelId: query.channelId } : {}),
         ...(query.team ? { team: { name: query.team } } : {}),
       },
       select: fileSelect,

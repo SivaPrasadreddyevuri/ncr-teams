@@ -1,5 +1,5 @@
 import { daysFromNow, localDayKey, relativeIso } from './format';
-import type { Channel, Person, Team } from './api';
+import type { Channel, ChatMessage, Person, Team } from './api';
 
 /**
  * Seed data.
@@ -12,11 +12,16 @@ import type { Channel, Person, Team } from './api';
  *
  * ## Which types are imported, and which are not
  *
- * `Person`, `Team` and `Channel` are re-exported from `lib/api` rather than
- * declared again. They were duplicated here once and the copies drifted: the
- * fixture versions were narrower than the API's, because every seeded row
- * happened to have a value where the API can return null. A duplicate type is a
+ * `Person`, `Team`, `Channel` and `ChatMessage` are re-exported from `lib/api`
+ * rather than declared again. They were duplicated here once and the copies
+ * drifted: the fixture versions were narrower than the API's, because every seeded
+ * row happened to have a value where the API can return null. A duplicate type is a
  * drift bug waiting to happen.
+ *
+ * `ChatMessage` drifted the same way, and the drift was visible rather than
+ * theoretical -- the fixture version had no `deleted` and no `editedAt`, so a
+ * component reading a live message could not render a tombstone or an "edited"
+ * label without a cast, and the same component reading a fixture one had to.
  *
  * `ActivityItem` is *not* shared, and deliberately so. The version below is
  * presentation -- a `title` and a `subtitle` written once at seed time. The API
@@ -25,7 +30,7 @@ import type { Channel, Person, Team } from './api';
  * reading activity from the API has to compose that prose itself, which is real
  * work in the component rather than a type alias.
  */
-export type { Channel, Person, Team };
+export type { Channel, ChatMessage, Person, Team };
 
 /**
  * Mock dataset.
@@ -188,30 +193,18 @@ export const channels: Channel[] = [
 /* Messages                                                            */
 /* ------------------------------------------------------------------ */
 
-export type Reaction = { emoji: string; userIds: string[] };
-export type Attachment = { id: string; name: string; size: number; type: string };
-export type ChatMessage = {
-  id: string;
-  channelId: string;
-  authorId: string;
-  body: string;
-  createdAt: string;
-  reactions: Reaction[];
-  attachments: Attachment[];
-};
-
 export const messages: ChatMessage[] = [
-  { id: 'm1', channelId: 'c1', authorId: 'u2', body: 'Hey team, standup notes are up.', createdAt: relativeIso(240), reactions: [], attachments: [] },
-  { id: 'm2', channelId: 'c1', authorId: 'u1', body: "I'll review the dashboard design this morning.", createdAt: relativeIso(232), reactions: [], attachments: [] },
-  { id: 'm3', channelId: 'c1', authorId: 'u3', body: "Here's the updated dashboard design for the dashboard.", createdAt: relativeIso(150), reactions: [{ emoji: '👍', userIds: ['u2', 'u4'] }], attachments: [{ id: 'f2', name: 'dashboard-design.fig', size: 4_400_000, type: 'application/octet-stream' }] },
-  { id: 'm4', channelId: 'c1', authorId: 'u1', body: 'Looks great. The new navigation and activity cards are in there too.', createdAt: relativeIso(148), reactions: [], attachments: [] },
-  { id: 'm5', channelId: 'c1', authorId: 'u2', body: 'Perfect! I will prepare the review.', createdAt: relativeIso(141), reactions: [], attachments: [] },
-  { id: 'm6', channelId: 'c1', authorId: 'u3', body: 'Perfect, I will prepare the review.', createdAt: relativeIso(120), reactions: [], attachments: [] },
-  { id: 'm7', channelId: 'c2', authorId: 'u1', body: 'Shipping the Q2 roadmap on Friday.', createdAt: relativeIso(90), reactions: [{ emoji: '🎉', userIds: ['u3'] }], attachments: [] },
-  { id: 'm8', channelId: 'c5', authorId: 'u4', body: 'Deploy to staging is green.', createdAt: relativeIso(200), reactions: [], attachments: [] },
-  { id: 'm9', channelId: 'c5', authorId: 'u5', body: 'Nice. Running the migration dry run now.', createdAt: relativeIso(180), reactions: [], attachments: [] },
-  { id: 'm10', channelId: 'c8', authorId: 'u3', body: 'Critique doc for the settings page is ready.', createdAt: relativeIso(60), reactions: [], attachments: [] },
-  { id: 'm11', channelId: 'c9', authorId: 'u1', body: 'Welcome to everyone joining this week.', createdAt: relativeIso(1440), reactions: [], attachments: [] },
+  { id: 'm1', channelId: 'c1', authorId: 'u2', body: 'Hey team, standup notes are up.', createdAt: relativeIso(240), reactions: [], attachments: [], deleted: false, editedAt: null, parentId: null, parentAuthor: null },
+  { id: 'm2', channelId: 'c1', authorId: 'u1', body: "I'll review the dashboard design this morning.", createdAt: relativeIso(232), reactions: [], attachments: [], deleted: false, editedAt: null, parentId: null, parentAuthor: null },
+  { id: 'm3', channelId: 'c1', authorId: 'u3', body: "Here's the updated dashboard design for the dashboard.", createdAt: relativeIso(150), reactions: [{ emoji: '👍', userIds: ['u2', 'u4'] }], attachments: [{ id: 'f2', name: 'dashboard-design.fig', size: 4_400_000, type: 'application/octet-stream' }], deleted: false, editedAt: null, parentId: null, parentAuthor: null },
+  { id: 'm4', channelId: 'c1', authorId: 'u1', body: 'Looks great. The new navigation and activity cards are in there too.', createdAt: relativeIso(148), reactions: [], attachments: [], deleted: false, editedAt: null, parentId: null, parentAuthor: null },
+  { id: 'm5', channelId: 'c1', authorId: 'u2', body: 'Perfect! I will prepare the review.', createdAt: relativeIso(141), reactions: [], attachments: [], deleted: false, editedAt: null, parentId: null, parentAuthor: null },
+  { id: 'm6', channelId: 'c1', authorId: 'u3', body: 'Perfect, I will prepare the review.', createdAt: relativeIso(120), reactions: [], attachments: [], deleted: false, editedAt: null, parentId: null, parentAuthor: null },
+  { id: 'm7', channelId: 'c2', authorId: 'u1', body: 'Shipping the Q2 roadmap on Friday.', createdAt: relativeIso(90), reactions: [{ emoji: '🎉', userIds: ['u3'] }], attachments: [], deleted: false, editedAt: null, parentId: null, parentAuthor: null },
+  { id: 'm8', channelId: 'c5', authorId: 'u4', body: 'Deploy to staging is green.', createdAt: relativeIso(200), reactions: [], attachments: [], deleted: false, editedAt: null, parentId: null, parentAuthor: null },
+  { id: 'm9', channelId: 'c5', authorId: 'u5', body: 'Nice. Running the migration dry run now.', createdAt: relativeIso(180), reactions: [], attachments: [], deleted: false, editedAt: null, parentId: null, parentAuthor: null },
+  { id: 'm10', channelId: 'c8', authorId: 'u3', body: 'Critique doc for the settings page is ready.', createdAt: relativeIso(60), reactions: [], attachments: [], deleted: false, editedAt: null, parentId: null, parentAuthor: null },
+  { id: 'm11', channelId: 'c9', authorId: 'u1', body: 'Welcome to everyone joining this week.', createdAt: relativeIso(1440), reactions: [], attachments: [], deleted: false, editedAt: null, parentId: null, parentAuthor: null },
 ];
 
 /* ------------------------------------------------------------------ */

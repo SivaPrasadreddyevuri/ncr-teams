@@ -38,6 +38,11 @@ export function channelsRouter() {
       // would be N+1.
       include: {
         messages: {
+          // Deleted messages excluded, which is a fix rather than a detail. A soft
+          // delete blanks the body but keeps the row, so without this the newest
+          // deleted message became the channel's preview: an empty line in the
+          // sidebar, replacing a real conversation summary.
+          where: { deletedAt: null },
           orderBy: { createdAt: 'desc' },
           take: 1,
           select: { body: true, createdAt: true },
@@ -123,6 +128,10 @@ export function channelsRouter() {
  *
  * Channels with nothing unread simply do not appear, hence the `?? 0` at the
  * call site.
+ *
+ * Soft-deleted messages are excluded, for the same reason `lastMessage` excludes
+ * them: a tombstone is not something anyone unread. Counting one leaves a badge the
+ * reader cannot clear by reading, because reading it does nothing.
  */
 async function unreadCounts(userId: string, channelIds: string[]): Promise<Map<string, number>> {
   if (channelIds.length === 0) return new Map();
@@ -133,6 +142,7 @@ async function unreadCounts(userId: string, channelIds: string[]): Promise<Map<s
     LEFT JOIN "ChannelReadState" s
       ON s."channelId" = m."channelId" AND s."userId" = ${userId}
     WHERE m."channelId" = ANY(${channelIds}::text[])
+      AND m."deletedAt" IS NULL
       AND (s."lastReadAt" IS NULL OR m."createdAt" > s."lastReadAt")
     GROUP BY m."channelId"
   `;
