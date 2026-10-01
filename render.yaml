@@ -43,16 +43,30 @@ services:
     # deliberately absent: it is deployed separately to Vercel, and building it
     # here would only cost time.
     #
-    # Node comes from .nvmrc (24). Check the build log on the first deploy and
-    # confirm; set NODE_VERSION=24 explicitly if the log shows otherwise.
-    buildCommand: npm ci && npm run db:generate && npm run build --workspace backend
+    # Node 24 is pinned explicitly in envVars below.
+    # `--include=dev` is load-bearing, not a precaution.
+    #
+    # This blueprint sets NODE_ENV=production, and npm reads that: with
+    # NODE_ENV=production a plain `npm ci` omits devDependencies. That silently
+    # removed @types/node, so `tsc` failed with
+    #
+    #   error TS2688: Cannot find type definition file for 'node'
+    #
+    # on the first deploy. `--include=dev` overrides the inference and installs
+    # the toolchain (typescript, tsx, @types/*) that the build needs. The running
+    # service does not want them -- it executes the already-compiled
+    # `node dist/server.js`, which only ever imports from `dependencies`.
+    buildCommand: npm ci --include=dev && npm run db:generate && npm run build --workspace backend
     startCommand: npm run start --workspace backend
 
     healthCheckPath: /api/health
-    # Liveness only, deliberately: it does not touch the database, so a
-    # dependency blip cannot mark a healthy instance down and take it out of
-    # rotation. Check `/api/health/ready` by hand after deploying -- that is the
-    # one that proves the connection string is right.
+    # Liveness only, deliberately, and it still returns 200 even when the
+    # database is unreachable: a health check that fails on a database blip
+    # restarts a process that was fine, and on the free tier that turns a brief
+    # blip into a cold start with a 30-second penalty. The database result is
+    # reported in the body instead (`db`, `migrationsApplied`), so a human
+    # checking after a deploy gets an unambiguous answer. Verify the connection
+    # string with /api/health/ready by hand -- that is the strict one.
     autoDeploy: true
 
     # Migrations are NOT run by this blueprint. Render's preDeployCommand is a
@@ -74,12 +88,29 @@ services:
       - key: NODE_ENV
         value: production
 
-      # The Aiven Service URI, verbatim, including `?sslmode=require`.
+      # Pinned explicitly rather than left to .nvmrc or package.json `engines`.
+      # Render resolves the Node version from NODE_VERSION first, then
+      # .node-version, then `engines`; `.nvmrc` is not a signal it documents.
+      # Both fallbacks here say 24 anyway, so this is belt-and-braces -- but it
+      # makes the version the service actually runs on a fact in the blueprint
+      # rather than something to infer from a build log.
+      - key: NODE_VERSION
+        value: "24"
+
+      # The Aiven Service URI, verbatim:
       #
-      # Not committed anywhere, so it has to be pasted in. The password in it may
-      # contain `@`, `:` or `/`, which have to be percent-encoded -- Aiven's
-      # dashboard can regenerate a simpler password if the connection string will
-      # not parse.
+      #   postgresql://avnadmin:PASSWORD@HOST:PORT/defaultdb?uselibpqcompat=true&sslmode=require
+      #
+      # Aiven's generated certificate is signed by Aiven's own CA, which is not
+      # in the trust store, so plain `?sslmode=require` fails with "self-signed
+      # certificate in certificate chain". `uselibpqcompat=true` keeps `require`
+      # semantics -- the connection still refuses to fall back to plaintext --
+      # while tolerating the untrusted CA. Prefer it over `sslmode=no-verify`,
+      # which drops verification entirely.
+      #
+      # The port is the one Aiven assigned (not 5432), and the password may
+      # contain `@`, `:` or `/`, which have to be percent-encoded -- the
+      # dashboard can regenerate a simpler password if it will not parse.
       - key: DATABASE_URL
         sync: false
 
