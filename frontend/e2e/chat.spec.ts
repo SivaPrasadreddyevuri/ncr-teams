@@ -34,6 +34,21 @@ const SARAH = { email: 'sarah@company.com', password: 'showcase-2026' };
  */
 const composerInput = (page: Page) => page.getByTestId('composer-input').first();
 
+/**
+ * Signs in through the real form.
+ *
+ * Deliberately not a token injection or a seeded cookie: the login form is part of
+ * what a person does, and a shortcut past it would skip the CSRF handshake and the
+ * `Secure` cookie flag, both of which is exactly what breaks in a split deployment.
+ *
+ * It also *types* the address rather than clicking the persona picker, which is the
+ * more honest path and caught a real bug. The picker seeds the email field, so
+ * clicking it keeps the two in step; typing an address does not. The form used to
+ * take the identity from the picker, so signing in as Sarah while it sat on Alex left
+ * the app believing it was Alex -- and because `currentUserId` decides whether a
+ * frame is another person or an echo of your own, every incoming typing indicator
+ * was discarded as a phantom second cursor.
+ */
 async function signIn(page: Page, who: { email: string; password: string }): Promise<void> {
   await page.goto('/login');
   await page.getByLabel('Work email').fill(who.email);

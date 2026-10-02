@@ -65,11 +65,20 @@ function LoginFormInner() {
 
     setBusy(true);
     try {
-      await api.login(email.trim(), password);
+      const { user } = await api.login(email.trim(), password);
 
-      // The persona is what drives role gating across the app; the cookie set by
-      // the API is what authenticates the request. Both are needed.
-      signIn(personaId);
+      // The session is the authority on who you are, and the persona picker is a
+      // demo affordance that seeds the email field.
+      //
+      // They normally agree, because choosing a persona overwrites the email. But
+      // typing an address instead leaves the picker wherever it was, and trusting the
+      // picker then meant signing in as sarah@company.com while the picker sat on
+      // Alex left the app believing it was Alex. That is not cosmetic: `currentUserId`
+      // is what decides whether an incoming frame is someone else or an echo of your
+      // own, so every other person's typing indicator was silently discarded as a
+      // phantom second cursor. It was found by a browser test that typed the second
+      // user's address rather than clicking the picker.
+      signIn(user.id);
       router.push('/');
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : 'Could not sign in. Try again.');
