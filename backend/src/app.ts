@@ -24,6 +24,8 @@ import { searchRouter } from './routes/search.js';
 import { eventsRouter } from './routes/events.js';
 import { statsRouter } from './routes/stats.js';
 import { attendanceRouter } from './routes/attendance.js';
+import { leaveRouter } from './routes/leave.js';
+import { meetingsRouter } from './routes/meetings.js';
 
 export function createApp(): Express {
   const app = express();
@@ -75,7 +77,9 @@ export function createApp(): Express {
 app.use('/api/search', searchRouter());
 app.use('/api/events', eventsRouter());
 app.use('/api/stats', statsRouter());
-app.use('/api/attendance', attendanceRouter());
+  app.use('/api/attendance', attendanceRouter());
+  app.use('/api/leave', leaveRouter());
+  app.use('/api/meetings', meetingsRouter());
 
   // A path-free handler, so this does not depend on Express 5's wildcard syntax
   // (path-to-regexp v8 removed bare `*` in favour of named segments).

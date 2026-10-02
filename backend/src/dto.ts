@@ -315,3 +315,144 @@ export function toAttendanceDto(row: AttendanceRow): AttendanceDto {
     overtimeMinutes: row.overtimeMinutes,
   };
 }
+
+/**
+ * A participant, as the meetings list and detail return them.
+ *
+ * `isOrganizer` is computed rather than sent as a separate flag, because "this person
+ * ran it" is a fact about the meeting's `organizerId` and the UI would otherwise
+ * have to carry it in two places.
+ */
+export type MeetingParticipantDto = {
+  id: string;
+  name: string;
+  avatarUrl: string | null;
+  isOrganizer: boolean;
+};
+
+export type MeetingDto = {
+  id: string;
+  title: string;
+  roomName: string;
+  organizerId: string;
+  startsAt: string;
+  endsAt: string;
+  participants: MeetingParticipantDto[];
+  /** Count only. The array is there for the faces; the count is for the label. */
+  participantCount: number;
+  /**
+   * Whether the meeting has ended, judged against the clock on the server.
+   *
+   * Sent so the client does not compute it from a clock that may disagree with the
+   * one that decided which side of the list it landed on.
+   */
+  ended: boolean;
+};
+
+export type MeetingRow = {
+  id: string;
+  title: string;
+  roomName: string;
+  organizerId: string;
+  startsAt: Date;
+  endsAt: Date;
+  participants: { user: { id: string; name: string; avatarUrl: string | null } }[];
+};
+
+export function toMeetingDto(row: MeetingRow): MeetingDto {
+  const now = Date.now();
+
+  return {
+    id: row.id,
+    title: row.title,
+    roomName: row.roomName,
+    organizerId: row.organizerId,
+    startsAt: row.startsAt.toISOString(),
+    endsAt: row.endsAt.toISOString(),
+    participants: row.participants.map(({ user }) => ({
+      ...user,
+      isOrganizer: user.id === row.organizerId,
+    })),
+    participantCount: row.participants.length,
+    ended: row.endsAt.getTime() <= now,
+  };
+}
+
+export type LeaveStatusDto = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+export type LeaveTypeDto = 'ANNUAL' | 'SICK' | 'PERSONAL' | 'PARENTAL' | 'UNPAID';
+
+/**
+ * The user shape a leave row needs alongside the request itself.
+ *
+ * Two names, not one: an approver has to see whose request this is, and once it is
+ * decided they also have to see who decided it. Embedding a single `person` would
+ * force the client to guess which of the two it is looking at.
+ */
+export type LeavePartyDto = {
+  id: string;
+  name: string;
+  avatarUrl: string | null;
+};
+
+export type LeaveRequestDto = {
+  id: string;
+  userId: string;
+  user: LeavePartyDto;
+  type: LeaveTypeDto;
+  from: string;
+  to: string;
+  days: number;
+  reason: string | null;
+  status: LeaveStatusDto;
+  decidedBy: LeavePartyDto | null;
+  decidedAt: string | null;
+  decisionNote: string | null;
+  createdAt: string;
+};
+
+/** The row shape `toLeaveRequestDto` reads, after Prisma has included both parties. */
+/**
+ * The row shape `toLeaveRequestDto` reads, after Prisma has included both parties.
+ *
+ * Hand-written rather than derived from the generated client, matching
+ * `AttendanceRow` above: the DTOs are the API's contract, and tying them to the
+ * client type would make a schema change silently reshape the response.
+ */
+type LeaveRequestRow = {
+  id: string;
+  userId: string;
+  type: LeaveTypeDto;
+  fromDate: Date;
+  toDate: Date;
+  days: number;
+  reason: string | null;
+  status: LeaveStatusDto;
+  decidedById: string | null;
+  decidedAt: Date | null;
+  decisionNote: string | null;
+  createdAt: Date;
+  user: LeavePartyDto;
+  decidedBy: LeavePartyDto | null;
+};
+
+function toLeavePartyDto(user: LeavePartyDto): LeavePartyDto {
+  return { id: user.id, name: user.name, avatarUrl: user.avatarUrl };
+}
+
+export function toLeaveRequestDto(row: LeaveRequestRow): LeaveRequestDto {
+  return {
+    id: row.id,
+    userId: row.userId,
+    user: toLeavePartyDto(row.user),
+    type: row.type,
+    from: row.fromDate.toISOString(),
+    to: row.toDate.toISOString(),
+    days: row.days,
+    reason: row.reason,
+    status: row.status,
+    decidedBy: row.decidedBy ? toLeavePartyDto(row.decidedBy) : null,
+    decidedAt: row.decidedAt ? row.decidedAt.toISOString() : null,
+    decisionNote: row.decisionNote,
+    createdAt: row.createdAt.toISOString(),
+  };
+}

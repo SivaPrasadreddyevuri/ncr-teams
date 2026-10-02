@@ -27,7 +27,7 @@ function spanInDays(from: Date, to: Date): number {
 }
 
 export function LeaveRequestForm() {
-  const { addLeave, leaveRequests, activeUserId } = useWorkspace();
+  const { addLeave, leaveRequests, leaveError, activeUserId } = useWorkspace();
 
   // Default to a sensible window rather than an empty form: 09:00 today through
   // 17:00 tomorrow, in the workspace's own timezone.
@@ -108,19 +108,29 @@ export function LeaveRequestForm() {
     };
   }
 
-  function submit(event: React.FormEvent) {
-    event.preventDefault();
-    setNotice(null);
+    function submit(event: React.FormEvent) {
+      event.preventDefault();
+      setNotice(null);
 
-    const { request, errors: found } = validate();
-    setErrors(found);
+      const { request, errors: found } = validate();
+      setErrors(found);
 
-    if (!request) return;
+      if (!request) return;
 
-    addLeave(request);
-    setReason('');
-    setNotice('Request submitted. It is now waiting for HR to decide.');
-  }
+      addLeave(request);
+      setReason('');
+      setNotice('Request submitted. It is now waiting for HR to decide.');
+    }
+
+    /**
+     * The local overlap check above is a courtesy, not the rule.
+     *
+     * The server rejects an overlapping window with a 409 and is the only thing that
+     * can be trusted about it -- this one reads the fixtures, which do not include
+     * anything submitted in another tab or on another device. So the count shown
+     * here is what the server last returned, and `leaveError` is how a rejection
+     * that got past this form is surfaced rather than silently dropped.
+     */
 
   return (
     <SectionCard title="Request leave">
@@ -207,9 +217,15 @@ export function LeaveRequestForm() {
           </small>
         </div>
 
-        <p className="leave-notice" role="status" aria-live="polite">
-          {notice ?? ''}
-        </p>
+          {leaveError && (
+            <p className="form-error" role="alert">
+              {leaveError}
+            </p>
+          )}
+
+          <p className="leave-notice" role="status" aria-live="polite">
+            {notice ?? ''}
+          </p>
       </form>
     </SectionCard>
   );

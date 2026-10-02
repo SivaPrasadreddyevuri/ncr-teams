@@ -287,7 +287,15 @@ export const api = {
       body: { email, password },
     }),
   logout: () => request<void>('/auth/logout', { method: 'POST' }),
-  me: () => request<{ user: { id: string; email: string; role: Person['role'] } }>('/auth/me'),
+  /**
+   * The signed-in user.
+   *
+   * Takes an `AbortSignal` because every read on this screen is cancellable and this
+   * one is no different -- without it the signal has to be threaded through a bespoke
+   * `fetch` here, which is the same request typed twice.
+   */
+  me: (signal?: AbortSignal) =>
+    request<{ user: { id: string; email: string; role: Person['role'] } }>('/auth/me', { signal }),
   wsToken: () =>
     request<{ token: string; expiresAt: string; expiresInSeconds: number }>('/auth/ws-token'),
 
@@ -496,6 +504,126 @@ export const api = {
       body: { action },
     }),
 
+  /* leave */
+  /**
+   * The signed-in user's own leave requests.
+   *
+   * No `userId` parameter, matching the server: a leave request is a statement
+   * someone makes about their own availability, so reading anyone else's is a
+   * different question with its own endpoint and its own role check.
+   */
+  myLeave: (
+    params: { status?: LeaveStatusDto; days?: number } = {},
+    signal?: AbortSignal,
+  ) => {
+    const query = new URLSearchParams();
+    if (params.status) query.set('status', params.status);
+    if (params.days) query.set('days', String(params.days));
+    const suffix = query.toString();
+    return request<{ requests: LeaveRequestDto[] }>(
+      `/leave${suffix ? `?${suffix}` : ''}`,
+      { signal },
+    );
+  },
+
+  /**
+   * Files a leave request for yourself.
+   *
+   * There is deliberately no `userId` in `body`, and no `days` either: the count is
+   * a column the server derives from the window, so a client that supplied it would
+   * be supplying the number an approver reads. The server rejects both keys.
+   */
+  fileLeave: (body: { type: LeaveTypeDto; from: string; to: string; reason?: string }) =>
+    request<{ request: LeaveRequestDto }>('/leave', { method: 'POST', body }),
+
+  /**
+   * Withdraws one of your own pending requests.
+   *
+   * Separate from the HR decision because the two are not the same act: this one is
+   * the requester changing their mind, the other is someone with the authority to
+   * approve time off.
+   */
+  cancelLeave: (id: string) =>
+    request<{ request: LeaveRequestDto }>(`/leave/${encodeURIComponent(id)}/cancel`, {
+      method: 'POST',
+      body: {},
+    }),
+
+  /**
+   * HR's queue. Pending by default.
+   *
+   * Refused with a 403 for anyone who is not HR, so this is only called from a
+   * screen that has already established the role -- see `RoleGate`.
+   */
+  leaveQueue: (status: LeaveStatusDto = 'PENDING', signal?: AbortSignal) =>
+    request<{ requests: LeaveRequestDto[]; status: LeaveStatusDto }>(
+      `/leave/requests/queue?status=${encodeURIComponent(status)}`,
+      { signal },
+    ),
+
+  /**
+   * Approves or rejects a request.
+   *
+   * `decidedBy` and `decidedAt` are not in `body` and cannot be: the record of who
+   * decided is taken from the session, so a client cannot file a decision in
+   * someone else's name.
+   */
+  decideLeave: (id: string, status: 'APPROVED' | 'REJECTED', note?: string) =>
+    request<{ request: LeaveRequestDto }>(
+      `/leave/requests/${encodeURIComponent(id)}/decision`,
+      {
+        method: 'POST',
+        body: note && note.length > 0 ? { status, note } : { status },
+      },
+    ),
+
+  /* meetings */
+  /**
+   * Meetings the caller is a participant in.
+   *
+   * `scope` is `upcoming` by default because that is what a meetings screen opens
+   * on. Note that `upcoming` includes a meeting already in progress -- it filters on
+   * `endsAt`, not `startsAt` -- so a running call is still listed and still joinable.
+   *
+   * This is deliberately not derived from `/events`. A MEETING row on the calendar
+   * carries no `roomName`, no participant list and no transcript, and a call history
+   * reads all three.
+   */
+  meetings: (
+    params: { scope?: 'upcoming' | 'past' | 'all'; days?: number; limit?: number } = {},
+    signal?: AbortSignal,
+  ) => {
+    const query = new URLSearchParams();
+    if (params.scope) query.set('scope', params.scope);
+    if (params.days) query.set('days', String(params.days));
+    if (params.limit) query.set('limit', String(params.limit));
+    const suffix = query.toString();
+    return request<{
+      meetings: MeetingDto[];
+      scope: string;
+      /** When the past/upcoming boundary was drawn, so the client need not guess. */
+      evaluatedAt: string;
+    }>(`/meetings${suffix ? `?${suffix}` : ''}`, { signal });
+  },
+
+  /**
+   * One meeting, with its participants and recent transcript.
+   *
+   * `messagesTruncated` is returned rather than inferred from the page length, so a
+   * transcript that happens to be exactly at the cap is not reported as complete.
+   */
+  meeting: (id: string, signal?: AbortSignal) =>
+    request<{
+      meeting: MeetingDto;
+      messages: {
+        id: string;
+        body: string;
+        createdAt: string;
+        author: { id: string; name: string };
+      }[];
+      messagesTruncated: boolean;
+    }>(`/meetings/${encodeURIComponent(id)}`, { signal }),
+
   /* events */
   /**
    * Calendar events in a window.
@@ -548,6 +676,66 @@ export const api = {
  * `record.date === today` false for every record, and the punch buttons would sit
  * permanently in the "not checked in" phase with no error to explain it.
  */
+/**
+ * A leave request as the API returns it.
+ *
+ * The server sends both parties as objects rather than ids, because the HR board
+ * renders a name and an avatar per row and the alternative is a second request per
+ * person. `decidedBy` is null until someone decides, which is what distinguishes a
+ * pending row from a decided one in the response as well as in the UI.
+ *
+ * `from` and `to` are full ISO instants, not bare dates: the form has always
+ * supported a window inside a day ("09:00 to 17:00 on the 14th"), and a date-only
+ * string would truncate the time the user typed.
+ */
+/**
+ * A meeting, as the API returns it.
+ *
+ * Participants are joined rather than returned as ids, because every consumer
+ * renders faces. `participantCount` is sent alongside because the label reads
+ * "3 participants" and the caller should not have to measure the array.
+ *
+ * `ended` is the server's judgement, not something the client recomputes from its own
+ * clock: the server is what decided which side of the list this landed on, so letting
+ * the browser decide again invites the two to disagree.
+ */
+export type MeetingDto = {
+  id: string;
+  title: string;
+  roomName: string;
+  organizerId: string;
+  startsAt: string;
+  endsAt: string;
+  participants: { id: string; name: string; avatarUrl: string | null; isOrganizer: boolean }[];
+  participantCount: number;
+  ended: boolean;
+};
+
+export type LeaveStatusDto = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+export type LeaveTypeDto = 'ANNUAL' | 'SICK' | 'PERSONAL' | 'PARENTAL' | 'UNPAID';
+
+export type LeaveRequestDto = {
+  id: string;
+  userId: string;
+  user: { id: string; name: string; avatarUrl: string | null };
+  /**
+   * A union, not `string`, so a status read off the wire cannot be assigned into a
+   * `Record<LeaveRequest['status'], ...>` map and quietly fall off its end. The
+   * server's schema is an enum, so a value outside this set is a bug, not a case to
+   * handle at runtime.
+   */
+  type: LeaveTypeDto;
+  from: string;
+  to: string;
+  days: number;
+  reason: string | null;
+  status: LeaveStatusDto;
+  decidedBy: { id: string; name: string; avatarUrl: string | null } | null;
+  decidedAt: string | null;
+  decisionNote: string | null;
+  createdAt: string;
+};
+
 export type AttendanceRecordDto = {
   id: string;
   userId: string;

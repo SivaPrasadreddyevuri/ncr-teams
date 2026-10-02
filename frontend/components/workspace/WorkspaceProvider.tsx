@@ -19,7 +19,7 @@ import {
   type LeaveRequest,
   type Person,
 } from '@/lib/data';
-import { api } from '@/lib/api';
+import { api, type LeaveTypeDto } from '@/lib/api';
 import { readJson, storageKeys, writeJson } from '@/lib/storage';
 import { localDayKey } from '@/lib/format';
 
@@ -61,6 +61,16 @@ type WorkspaceValue = WorkspaceState & {
 
   addLeave: (request: LeaveRequest) => void;
   decideLeave: (id: string, status: LeaveRequest['status'], decidedById: string) => void;
+  /** Withdraws one of the signed-in user's own pending requests. */
+  cancelLeaveRequest: (id: string) => void;
+  /**
+   * Why the last leave write could not be saved, or null.
+   *
+   * Same reasoning as `attendanceError`: a submitted request or an approver's click
+   * stays on screen either way, and the only honest way to show that is to say the
+   * save failed rather than to let an unsaved row pass for a real one.
+   */
+  leaveError: string | null;
 
   punchIn: () => void;
   punchOut: () => void;
@@ -103,6 +113,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<WorkspaceState>(seedState);
   const [ready, setReady] = useState(false);
   const [attendanceError, setAttendanceError] = useState<string | null>(null);
+  const [leaveError, setLeaveError] = useState<string | null>(null);
 
   useEffect(() => {
     const session = readJson<Session>(storageKeys.session);
@@ -178,10 +189,121 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     setState((current) => ({ ...current, activeUserId: currentUser.id }));
   }, []);
 
+  /**
+   * Files a leave request and adopts the server's row.
+   *
+   * Optimistic for the same reason the punch is: the form clears and a confirmation
+   * appears, and waiting on the round trip to show either would make the button feel
+   * broken. The server's row replaces the local one on success -- it carries the
+   * real id and the day count the server computed, which is the number HR reads.
+   *
+   * A failure leaves the local row and sets `leaveError`, because a request that
+   * silently vanished from the list after being submitted is worse than one that is
+   * visibly unsaved.
+   */
   const addLeave = useCallback((request: LeaveRequest) => {
     setState((current) => ({ ...current, leaveRequests: [request, ...current.leaveRequests] }));
+    setLeaveError(null);
+
+    void api
+      .fileLeave({
+        // Narrowed to the server's enum. `LeaveType | string` in the fixture widens
+        // to `string`, which would let an unknown type through to a 400 at runtime.
+        type: request.type as LeaveTypeDto,
+        from: request.from,
+        to: request.to,
+        // An empty reason is omitted rather than sent as '', which the server treats
+        // as a blank reason rather than as none given.
+        ...(request.reason && request.reason.length > 0 ? { reason: request.reason } : {}),
+      })
+      .then(({ request: saved }) => {
+        setState((current) => ({
+          ...current,
+          leaveRequests: current.leaveRequests.map((row) =>
+            // Matched on the local id, which is what the optimistic row carries.
+            row.id === request.id
+              ? {
+                  ...row,
+                  id: saved.id,
+                  days: saved.days,
+                  reason: saved.reason,
+                  // The server's enum union is narrower than the fixture's, so it is
+                  // assignable here rather than the other way round.
+                  status: saved.status,
+                  decidedById: saved.decidedBy?.id ?? null,
+                  decidedAt: saved.decidedAt,
+                  decisionNote: saved.decisionNote,
+                }
+              : row,
+          ),
+        }));
+      })
+      .catch((cause: unknown) => {
+        setLeaveError(
+          cause instanceof Error
+            ? cause.message
+            : 'That request could not be saved. Check the connection and retry.',
+        );
+      });
   }, []);
 
+  /**
+   * Withdraws one of your own pending requests, then adopts the server's row.
+   *
+   * Optimistic like the other two writes, and reconciled the same way: the row is
+   * marked CANCELLED immediately so the button responds, and the server's version
+   * replaces it. It is the requester's own row, so the optimistic update can be keyed
+   * on the id without asking whose request it is.
+   */
+  const cancelLeaveRequest = useCallback((id: string) => {
+    setState((current) => ({
+      ...current,
+      leaveRequests: current.leaveRequests.map((row) =>
+        row.id === id ? { ...row, status: 'CANCELLED' as const } : row,
+      ),
+    }));
+    setLeaveError(null);
+
+    void api
+      .cancelLeave(id)
+      .then(({ request: saved }) => {
+        setState((current) => ({
+          ...current,
+          leaveRequests: current.leaveRequests.map((row) =>
+            row.id === id ? { ...row, status: saved.status } : row,
+          ),
+        }));
+      })
+      .catch((cause: unknown) => {
+        // Revert, unlike the other two writes. A withdrawal that the server refused
+        // must not stay on screen as withdrawn: the leave is still booked, and the
+        // whole point of withdrawing is that it is not.
+        setState((current) => ({
+          ...current,
+          leaveRequests: current.leaveRequests.map((row) =>
+            row.id === id ? { ...row, status: 'PENDING' as const } : row,
+          ),
+        }));
+        setLeaveError(
+          cause instanceof Error
+            ? cause.message
+            : 'That request could not be withdrawn. Check the connection and retry.',
+        );
+      });
+  }, []);
+
+  /**
+   * Approves or rejects a request, then adopts the server's row.
+   *
+   * The local update is optimistic and the server's version wins, for the same
+   * reason the punch does: an approver clicking twice should see the button
+   * respond immediately, and the row on screen afterwards must be the one the
+   * database holds -- including `decidedBy`, which is taken from the session and so
+   * cannot be set here at all.
+   *
+   * `decidedById` is written from the active user so the local shape stays
+   * consistent for the instant before the response lands; the server replaces it.
+   */
   const decideLeave = useCallback(
     (id: string, status: LeaveRequest['status'], decidedById: string) => {
       setState((current) => ({
@@ -192,6 +314,33 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
             : row,
         ),
       }));
+
+      if (status !== 'APPROVED' && status !== 'REJECTED') return;
+
+      void api
+        .decideLeave(id, status)
+        .then(({ request }) => {
+          setState((current) => ({
+            ...current,
+            leaveRequests: current.leaveRequests.map((row) =>
+            row.id === id
+              ? {
+                  ...row,
+                  status: request.status,
+                  decidedById: request.decidedBy?.id ?? decidedById,
+                  decidedAt: request.decidedAt ?? null,
+                  decisionNote: request.decisionNote ?? null,
+                }
+              : row,
+            ),
+          }));
+        })
+        .catch(() => {
+          // The optimistic row stays on screen. It is not persisted, and the
+          // alternative -- silently reverting an approver's click -- reads as the
+          // button not working. `leaveError` is the signal that it did not save.
+          setLeaveError('That decision could not be saved. Check the connection and retry.');
+        });
     },
     [],
   );
@@ -331,16 +480,18 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       people: directory,
       signIn,
       signOut,
-          addLeave,
-          decideLeave,
-          punchIn,
-          punchOut,
-          attendanceError,
-          addFiles,
-          removeFile,
-          toggleFileStar,
-        }),
-        [
+      addLeave,
+      decideLeave,
+      cancelLeaveRequest,
+      leaveError,
+      punchIn,
+      punchOut,
+      attendanceError,
+      addFiles,
+      removeFile,
+      toggleFileStar,
+    }),
+    [
       state,
       ready,
       activeUser,
@@ -348,8 +499,11 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       signOut,
       addLeave,
       decideLeave,
+      cancelLeaveRequest,
+      leaveError,
       punchIn,
       punchOut,
+      attendanceError,
       addFiles,
       removeFile,
       toggleFileStar,

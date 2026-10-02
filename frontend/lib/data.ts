@@ -356,11 +356,28 @@ export type LeaveRequest = {
   from: string;
   to: string;
   days: number;
-  reason: string;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  /**
+   * Nullable, and matching what the API returns.
+   *
+   * This was `string` while the column and the endpoint both allow null, so a
+   * request filed without a reason came back as `null` and did not fit the type.
+   * Coercing it to '' at the boundary would have been the easy fix and the wrong
+   * one: "no reason given" and "an empty reason" are different, and the UI now has
+   * to decide which to render rather than being handed an empty string.
+   */
+  reason: string | null;
+  /**
+   * A union rather than `string`, so a status coming back from the API cannot
+   * widen the field and quietly break the exhaustive map in `MyLeaveRequests`.
+   * `CANCELLED` was added when the endpoint started accepting withdrawal; the seed
+   * rows predate it and none of them use it.
+   */
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
   decidedById: string | null;
-  /** When the decision was made. Optional: the seed rows predate it. */
-  decidedAt?: string;
+  /** When the decision was made. Null while pending. */
+  decidedAt?: string | null;
+  /** Free text left by whoever approved or rejected. Null when there was none. */
+  decisionNote?: string | null;
 };
 
 export const leaveRequests: LeaveRequest[] = [

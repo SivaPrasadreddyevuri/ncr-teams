@@ -3,25 +3,39 @@
 import { useMemo } from 'react';
 import { SectionCard } from '@/components/SectionCard';
 import { PersonAvatar } from '@/components/profile/PersonAvatar';
+import { useDirectory } from '@/components/profile/ProfileProvider';
 import { PhoneIncoming, PhoneMissed } from 'lucide-react';
-import { api, type CalendarEventDto } from '@/lib/api';
+import { api, type CalendarEventDto, type MeetingDto } from '@/lib/api';
 import { useApiData } from '@/lib/useApiData';
-import { calendarEvents, meetings, personById } from '@/lib/data';
+import { calendarEvents } from '@/lib/data';
 import { formatTime, relativeTime, APP_TIME_ZONE } from '@/lib/format';
 
 /**
- * A client component because the upcoming list needs the session cookie.
+ * A client component because both lists need the session cookie.
  *
- * `past` stays on the fixture `meetings` because there is no meetings endpoint
- * yet. It is deliberately not derived from events: a finished meeting and a
- * calendar entry are different rows, and collapsing them would quietly lose the
- * join time and the missed-call state this list renders.
+ * `past` is a meetings read, not an events read. A MEETING row on the calendar is a
+ * different thing from a meeting: it has no `roomName`, no participant list and no
+ * transcript, so building the call history out of `/events` would quietly lose the
+ * join time this list renders. `/api/meetings?scope=past` returns the meeting rows
+ * themselves.
+ *
+ * `missed` is still the fixture's `id === 'mt4'` check. Deciding what "missed" means
+ * needs attendance data that does not exist yet -- a meeting you never joined is not
+ * recorded anywhere -- so rather than infer it from a clock it is left where it is
+ * and the seed is the source.
  */
 export function CallsScreen() {
-  const past = useMemo(
-    () => [...meetings].sort((a, b) => b.startsAt.localeCompare(a.startsAt)).slice(0, 4),
+  const people = useDirectory();
+
+  const finished = useApiData<MeetingDto[]>(
+    'meetings:past',
+    (signal) => api.meetings({ scope: 'past', days: 30, limit: 4 }, signal).then((r) => r.meetings),
+    // No fixture seed for the same reason the queue has none: the fixture `meetings`
+    // are upcoming, not past, so using them would put future calls in a history list.
     [],
   );
+
+  const past = finished.data.slice(0, 4);
 
   const events = useApiData<CalendarEventDto[]>(
     'events:calls',
@@ -53,8 +67,22 @@ export function CallsScreen() {
   return (
     <div className="grid-2">
       <SectionCard title="Call History" href="/meetings">
+        {past.length === 0 && (
+          <p style={{ fontSize: 13, color: 'var(--muted)', padding: '10px 0' }}>
+            {finished.stale ? 'Could not load your call history.' : 'No finished calls yet.'}
+          </p>
+        )}
+
         {past.map((meeting) => {
-          const organizer = personById(meeting.organizerId);
+          // The organiser is one of the participants, flagged by the server. Looking
+          // them up by id separately would be a second source of truth for the same
+          // fact.
+          const organizerId = meeting.participants.find((p) => p.isOrganizer)?.id;
+          // `PersonAvatar` wants a full `Person`, and a participant carries only the
+          // three fields the API joins. The directory has the rest, so it is the
+          // source for the avatar and `online`; the participant row is the source for
+          // who organised it.
+          const organizer = people.find((person) => person.id === organizerId);
           const missed = meeting.id === 'mt4';
           return (
             <div className="meeting-row" key={meeting.id}>

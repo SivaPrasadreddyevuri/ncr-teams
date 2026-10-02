@@ -18,8 +18,10 @@ import type { Department, Person } from '@/lib/api';
  * least risky one to move and a good check that the pattern works before it is
  * used on something busier.
  *
- * `LeaveTable` still reads the fixtures: the leave endpoints do not exist yet,
- * so wiring it would be pointing it at a route that 404s.
+ * `LeaveTable` reads the HR queue from the API, with the fixture rows as the seed
+ * so the page still renders if the backend is down. It is inside `RoleGate` because
+ * the server refuses the queue to anyone who is not HR -- the gate is there to avoid
+ * showing an empty board followed by a 403, not as the enforcement.
  */
 export default function HrPage() {
   const departments = useApiData<Department[]>(
