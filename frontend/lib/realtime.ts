@@ -110,6 +110,14 @@ export class RealtimeClient {
   private socket: WebSocket | null = null;
   private token: string | null = null;
   private readonly channels = new Set<string>();
+  /**
+   * Meetings this client follows, kept beside the channels rather than folded in.
+   *
+   * The server treats the two as separate authorised sets -- channels by team
+   * membership, meetings by participation -- and it replaces both on every
+   * `subscribe` frame, so one set cannot be sent without the other.
+   */
+  private readonly meetings = new Set<string>();
   private attempt = 0;
   private closedByUs = false;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -165,7 +173,7 @@ export class RealtimeClient {
       this.attempt = 0;
       this.emitStatus('open');
       // A fresh socket knows nothing, so the subscription is re-sent.
-      if (this.channels.size > 0) this.sendSubscribe();
+      if (this.channels.size > 0 || this.meetings.size > 0) this.sendSubscribe();
     };
 
     this.socket.onmessage = (event) => {
@@ -198,6 +206,18 @@ export class RealtimeClient {
     this.sendSubscribe();
   }
 
+  /**
+   * Subscribes to meetings. Idempotent, and survives reconnection.
+   *
+   * A separate call rather than an argument on `subscribe` because the two answer
+   * different questions -- a channel because of team membership, a meeting because of
+   * participation -- and a caller in a call has usually not opened the chat at all.
+   */
+  subscribeMeetings(meetingIds: string[]): void {
+    for (const id of meetingIds) this.meetings.add(id);
+    this.sendSubscribe();
+  }
+
   send(type: string, payload: unknown = {}): void {
     if (this.socket?.readyState !== WebSocket.OPEN) return;
     this.socket.send(JSON.stringify({ type, payload }));
@@ -212,8 +232,18 @@ export class RealtimeClient {
     this.socket = null;
   }
 
+  /**
+   * Always sends both sets.
+   *
+   * The server *replaces* its subscription on every `subscribe` frame rather than
+   * merging, so sending only the channels here would silently unsubscribe every
+   * meeting, and vice versa.
+   */
   private sendSubscribe(): void {
-    this.send('subscribe', { channelIds: [...this.channels] });
+    this.send('subscribe', {
+      channelIds: [...this.channels],
+      meetingIds: [...this.meetings],
+    });
   }
 
   private scheduleReconnect(): void {

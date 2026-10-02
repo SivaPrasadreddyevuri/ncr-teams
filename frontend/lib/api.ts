@@ -397,20 +397,24 @@ export const api = {
     }),
 
   /* files */
-  files: (params: { folderId?: string; team?: string; channelId?: string } = {}) => {
+  files: (params: { folderId?: string; team?: string; channelId?: string; meetingId?: string } = {}) => {
     const query = new URLSearchParams();
     if (params.folderId) query.set('folderId', params.folderId);
     if (params.team) query.set('team', params.team);
     // Added for the chat sidebar's Files tab, which asks "what was shared here".
     if (params.channelId) query.set('channelId', params.channelId);
+    // The same question asked of a call. Scoped server-side by participation, so this
+    // returns nothing for a meeting you are not in rather than confirming it exists.
+    if (params.meetingId) query.set('meetingId', params.meetingId);
     const suffix = query.toString();
     return request<{ files: FileRow[] }>(`/files${suffix ? `?${suffix}` : ''}`);
   },
-  uploadFile: (blob: Blob, name: string, extra: { folderId?: string; channelId?: string } = {}) => {
+  uploadFile: (blob: Blob, name: string, extra: { folderId?: string; channelId?: string; meetingId?: string } = {}) => {
     const form = new FormData();
     form.append('file', blob, name);
     if (extra.folderId) form.append('folderId', extra.folderId);
     if (extra.channelId) form.append('channelId', extra.channelId);
+    if (extra.meetingId) form.append('meetingId', extra.meetingId);
     return request<{ file: FileRow }>('/files', { method: 'POST', formData: form });
   },
   starFile: (fileId: string) =>
@@ -642,6 +646,49 @@ export const api = {
       { method: 'POST', body: {} },
     ),
 
+  /**
+   * Opens, or rejoins, a channel's call.
+   *
+   * Takes a channel rather than a time because the call button in a channel header has
+   * no start time to send. The server derives the room from the channel, so calling
+   * this twice returns the same meeting with `created: false` rather than a second
+   * room nobody could find.
+   */
+  startChannelCall: (channelId: string) =>
+    request<{ meeting: MeetingDto; created: boolean }>('/meetings', {
+      method: 'POST',
+      body: { channelId },
+    }),
+
+  /**
+   * The in-call transcript, paginated.
+   *
+   * Separate from the channel thread on purpose: meeting chat is a different
+   * conversation with different permissions, and widening one endpoint to accept both
+   * ids would make every scoping question ambiguous.
+   */
+  meetingMessages: (
+    meetingId: string,
+    params: { before?: string; limit?: number } = {},
+    signal?: AbortSignal,
+  ) => {
+    const search = new URLSearchParams();
+    if (params.before) search.set('before', params.before);
+    if (params.limit) search.set('limit', String(params.limit));
+    const suffix = search.toString();
+    return request<{ messages: MeetingMessageDto[]; nextCursor: string | null }>(
+      `/meetings/${encodeURIComponent(meetingId)}/messages${suffix ? `?${suffix}` : ''}`,
+      { signal },
+    );
+  },
+
+  /** Posts to the in-call transcript. Persisted, and delivered over the socket. */
+  sendMeetingMessage: (meetingId: string, body: string) =>
+    request<{ message: MeetingMessageDto }>(
+      `/meetings/${encodeURIComponent(meetingId)}/messages`,
+      { method: 'POST', body: { body } },
+    ),
+
   /* events */
   /**
    * Calendar events in a window.
@@ -727,6 +774,26 @@ export type MeetingDto = {
   participants: { id: string; name: string; avatarUrl: string | null; isOrganizer: boolean }[];
   participantCount: number;
   ended: boolean;
+};
+
+/**
+ * A message in the in-call transcript.
+ *
+ * Structurally the channel thread's message, so one component can render both. The
+ * distinction is `meetingId` rather than an empty `channelId`: a room has to be able
+ * to tell the two apart, and the socket relay routes on exactly this field.
+ */
+export type MeetingMessageDto = {
+  id: string;
+  body: string;
+  authorId: string;
+  meetingId: string | null;
+  channelId: string;
+  createdAt: string;
+  deleted: boolean;
+  editedAt: string | null;
+  parentId: string | null;
+  parentAuthor: string | null;
 };
 
 export type LeaveStatusDto = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
