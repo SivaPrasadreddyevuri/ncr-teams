@@ -78,11 +78,18 @@ export function MessageRow({
   }
 
   return (
-    <li
-      className={`msg${mine ? ' mine' : ''}${message.pending ? ' pending' : ''}${message.failed ? ' failed' : ''}`}
-      ref={rowRef}
-      data-message-id={message.id}
-    >
+      <li
+        className={`msg${mine ? ' mine' : ''}${message.pending ? ' pending' : ''}${message.failed ? ' failed' : ''}`}
+        ref={rowRef}
+        data-message-id={message.id}
+        // A hook for the browser harness, alongside the `data-message-id` that was
+        // already here. `pending` and `failed` are separate booleans rather than a
+        // state enum so a test can assert "still being sent" without parsing the
+        // class list, which is presentation.
+        data-testid="message"
+        data-pending={message.pending || undefined}
+        data-failed={message.failed || undefined}
+      >
       <PersonAvatar person={author} size="sm" />
 
       <div>

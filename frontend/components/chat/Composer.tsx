@@ -166,17 +166,19 @@ export function Composer({
         what lets Escape clear a draft that the user cannot otherwise get rid of
         without selecting it all first.
       */}
-      <form
-        className="composer"
-        onSubmit={(event) => {
-          event.preventDefault();
-          submit();
-        }}
-      >
-        <textarea
-          key={editing}
-          ref={textareaRef}
-          placeholder={`Message #${channelName}`}
+        <form
+          className="composer"
+          data-testid="composer"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submit();
+          }}
+        >
+          <textarea
+            key={editing}
+            ref={textareaRef}
+            data-testid="composer-input"
+            placeholder={`Message #${channelName}`}
           value={body}
           rows={1}
           maxLength={MAX_BODY}

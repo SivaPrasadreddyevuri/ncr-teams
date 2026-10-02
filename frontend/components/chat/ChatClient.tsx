@@ -138,6 +138,28 @@ export function ChatClient({
     [people, me],
   );
 
+  /**
+   * Mirrors of values the socket's frame handler reads.
+   *
+   * These exist because of the reconnect bug they fix. The socket effect used to list
+   * `now` and `resolvedPeople` as dependencies, and `now` is a clock that ticks every
+   * `TICK_MS`. So the effect tore the socket down and built a fresh `RealtimeClient`
+   * once a second -- each new client starting with `attempt = 0`, so the backoff never
+   * grew past its first step. That produced a reconnect about every 300-500ms, and
+   * every reconnect cleared the typing state, so a typing indicator could never stay on
+   * screen long enough to be seen.
+   *
+   * The handler only needs the *current* value at the moment a frame arrives, so a ref
+   * is the right instrument: the effect reads the latest value without depending on
+   * its identity, and the socket is created once per channel rather than once per tick.
+   */
+  const nowRef = useRef(now);
+  nowRef.current = now;
+  const peopleRef = useRef(resolvedPeople);
+  peopleRef.current = resolvedPeople;
+  const currentUserIdRef = useRef(currentUserId);
+  currentUserIdRef.current = currentUserId;
+
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), TICK_MS);
     return () => clearInterval(timer);
@@ -229,19 +251,19 @@ export function ChatClient({
           const userId = payload.userId as string;
           // The server never echoes a typing frame to its sender, but a stale
           // frame from before a channel switch could still arrive.
-          if (userId === currentUserId) return;
+          if (userId === currentUserIdRef.current) return;
 
           setTyping((current) => {
             if (frame.type === 'typing.stop') {
               return current.filter((peer) => peer.userId !== userId);
             }
-            const name =
-              resolvedPeople.find((p) => p.id === userId)?.name ?? 'Someone';
+const name =
+            peopleRef.current.find((p) => p.id === userId)?.name ?? 'Someone';
             const existing = current.find((peer) => peer.userId === userId);
             const next: TypingPeer = {
               userId,
               name,
-              expiresAt: now + TYPING_TTL_MS,
+              expiresAt: nowRef.current + TYPING_TTL_MS,
             };
             return existing
               ? current.map((peer) => (peer.userId === userId ? next : peer))
@@ -288,7 +310,14 @@ export function ChatClient({
       socketRef.current = null;
       client.close();
     };
-  }, [live, active?.id, currentUserId, resolvedPeople, now]);
+  // Only the channel, deliberately.
+    //
+    // `live` decides whether there is a socket at all; `active?.id` decides which
+    // channel it is subscribed to. Anything else here -- a ticking clock, the people
+    // array, the signed-in id -- belongs in a ref read at frame time, not in this
+    // list. See the refs above: with `now` in the dependency list this effect rebuilt
+    // the socket once a second and the chat reconnected in a loop.
+  }, [live, active?.id]);
 
   // Marking read is a nicety; a failure must not surface as an error.
   useEffect(() => {
@@ -713,6 +742,12 @@ export function ChatClient({
             <button
               key={channel.id}
               className={channel.id === activeId ? 'chat-back active' : 'chat-back'}
+              // Hook for the browser harness. `data-channel-id` because the visible
+              // text is the channel *name* and two channels can share one; the test
+              // needs the id to assert on the messages that arrive in it.
+              data-testid="channel-button"
+              data-channel-id={channel.id}
+              aria-current={channel.id === activeId ? 'true' : undefined}
               onClick={() => {
                 setActiveId(channel.id);
                 setDrawerOpen(false);
@@ -768,7 +803,14 @@ export function ChatClient({
                   <p>This channel is quiet so far. Be the first to post.</p>
                 </div>
               ) : (
-                <ul className="result-list" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                <ul
+                  className="result-list"
+                  style={{ listStyle: 'none', margin: 0, padding: 0 }}
+                  // Hook for the browser harness. The list has no stable id or role of
+                  // its own -- `result-list` is a utility class shared with the search
+                  // results -- so a test would otherwise have to select on it.
+                  data-testid="message-list"
+                >
                   {/*
                     Older history loads on demand rather than up front. The API
                     pages with an opaque cursor and `before` was never being passed,
@@ -811,7 +853,18 @@ export function ChatClient({
             {/* Whether the thread is real. Shown because a demo that silently
                 mixes live and fixture data is impossible to tell apart from one
                 that is not working. */}
-            <p className="composer-status" role="status">
+            <p
+              className="composer-status"
+              role="status"
+              // Hook for the browser harness. The label is prose -- "Live",
+              // "Reconnecting", "Fixtures only" -- and a test waiting for the socket to
+              // open should be able to ask for the state rather than parse a sentence.
+              // A fixed sleep is what made the typing test flaky: it sometimes ran
+              // before the socket was up, and the first `typing.start` was dropped on
+              // the floor by the `if (!client) return` guard.
+              data-testid="connection-status"
+              data-state={live ? connection : 'unauthenticated'}
+            >
               {connectionLabel}
             </p>
 

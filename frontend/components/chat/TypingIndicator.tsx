@@ -33,7 +33,18 @@ export function TypingIndicator({ peers, now }: Props) {
   }
 
   return (
-    <p className="typing-indicator" role="status" aria-live="polite">
+      <p
+        className="typing-indicator"
+        role="status"
+        aria-live="polite"
+        // Hook for the browser harness. The rendered sentence changes shape with the
+        // peer count ("A is typing", "A and B are typing", "3 people are typing"), so
+        // a test asserting on it would have to branch three ways; this exposes the
+        // count and the names instead.
+        data-testid="typing-indicator"
+        data-count={active.length}
+        data-names={names.join(',')}
+      >
       <span className="typing-dots" aria-hidden="true">
         <i />
         <i />

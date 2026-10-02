@@ -17,3 +17,12 @@ next-env.d.ts
 
 # vercel
 .vercel
+
+# Playwright. The HTML report and the trace/screenshot artefacts are per-run output
+# and are large; a commit that accidentally includes one is several megabytes of
+# someone else's failed run.
+# `playwright.config.ts` and `e2e/` are NOT ignored -- the suite is source.
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
