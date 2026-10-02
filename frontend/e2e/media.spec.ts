@@ -183,9 +183,14 @@ test.describe('meeting room: live media', () => {
        * different lists and land in two different rooms. The test then waited for a
        * tile that could never appear, for a reason that had nothing to do with media.
        *
-       * A channel has one derived room, so pressing the call button in the same
-       * channel is the only way to be sure both are in the same LiveKit room -- and it
-       * is the flow a person actually uses.
+       * A channel has one derived room, so going through it is the only way to be
+       * sure both are in the same LiveKit room -- and it is the flow a person uses.
+       *
+       * Neither side touches the channel list. It lives in a drawer that is collapsed
+       * on a desktop viewport, and both land on the same channel by default; opening
+       * the drawer would make the test depend on a layout detail rather than on the
+       * call flow. Alex's channel name is read from his button label and Sarah's tab
+       * is asserted to name the same one, so a divergence fails loudly.
        */
       await alex.goto('/chat');
       await expect(alex.getByRole('button', { name: /^Start video call in #/ })).toBeVisible({
@@ -203,17 +208,21 @@ test.describe('meeting room: live media', () => {
       });
 
       await sarah.goto('/chat');
-      await sarah.getByTestId('channel-button').filter({ hasText: channel }).first().click();
       await sarah.getByRole('button', { name: /^Meetings$/ }).click();
-      await sarah.getByRole('button', { name: `Join the call in #${channel}` }).click();
 
-      // Both sockets settled before asserting matters: a track published before the
-      // other side subscribes still arrives, but the remote participant only appears
-      // after its own event.
+      // She has not joined, so her own meeting list would not mention this room. The
+      // tab asks the channel instead -- which is the whole point of that route.
+      await expect(sarah.getByText(new RegExp(`A call is open in #${channel}\\.`))).toBeVisible({
+        timeout: 30_000,
+      });
+      await sarah.getByRole('button', { name: `Join the call in #${channel}` }).click();
       await expect(sarah.getByTestId('room-status')).toHaveAttribute('data-state', 'live', {
         timeout: 60_000,
       });
 
+      // Both sockets settled before asserting matters: a track published before the
+      // other side subscribes still arrives, but the remote participant only appears
+      // after its own event.
       await assertReceivingFrames(alex, 'Sarah');
       await assertReceivingFrames(sarah, 'Alex');
     } finally {
