@@ -1982,6 +1982,47 @@ button {
   max-width: 70%;
 }
 
+/* The call, opened over the chat screen. */
+.call-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: #0b0f18;
+  padding: 20px;
+  overflow: auto;
+}
+
+/*
+ * The call buttons in a channel header.
+ *
+ * Right-aligned in their own group so the channel name and member count stay where
+ * they were. `margin-left: auto` rather than `justify-content` on the head, which
+ * already spaces its children for the layout that had no buttons in it.
+ */
+.panel-head-calls {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.panel-head-calls .icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.call-error {
+  margin: 0;
+  padding: 8px 16px;
+  background: #4a1d24;
+  color: #ffd7dc;
+  font-size: 12px;
+}
+
+/* A call action inside the Meetings tab, which is centred text. */
+.empty-state .join {
+  margin-top: 14px;
+}
+
 .video .person {
   position: absolute;
   bottom: 10px;

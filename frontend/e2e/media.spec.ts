@@ -72,6 +72,40 @@ async function joinFirstMeeting(page: Page): Promise<void> {
   await expect(page.getByTestId('room-status')).toBeVisible({ timeout: 20_000 });
 }
 
+/**
+ * Asserts `viewer` is receiving a real frame from `other`.
+ *
+ * This is the assertion that separates a call from a picture of one. A tile carrying
+ * the other person's name is satisfied by the meeting's seeded participant list, so
+ * it passes with the camera disconnected -- which is exactly the bug it originally
+ * masked. Three things are therefore asserted in order of what they rule out:
+ *
+ * 1. the tile is a *connected* participant, not an invited one
+ * 2. a track was attached to the element -- the component's own report of it
+ * 3. the element is playing frames -- which `attach` alone does not guarantee, since a
+ *    stream that never starts leaves `videoWidth` at 0 and renders nothing
+ */
+async function assertReceivingFrames(viewer: Page, other: string): Promise<void> {
+  const tile = viewer.getByTestId('meeting-tile').filter({ hasText: other }).first();
+  await expect(tile).toHaveAttribute('data-connected', 'true', { timeout: 45_000 });
+
+  const video = tile.getByTestId('meeting-video');
+  await expect(video).toHaveAttribute('data-has-video', 'true', { timeout: 45_000 });
+
+  const box = await video.boundingBox();
+  expect(box, `${other}'s tile should have a laid-out video element`).not.toBeNull();
+  expect(box!.width).toBeGreaterThan(0);
+  expect(box!.height).toBeGreaterThan(0);
+
+  const playing = await video.evaluate(
+    (element) =>
+      (element as HTMLVideoElement).videoWidth > 0 &&
+      (element as HTMLVideoElement).videoHeight > 0 &&
+      (element as HTMLVideoElement).readyState >= 2,
+  );
+  expect(playing, `${other}'s stream should be reaching the video element`).toBe(true);
+}
+
 test.describe('meeting room: live media', () => {
   test('connects and reports itself live, with the controls enabled', async ({ page }) => {
     await signIn(page, ALEX);
@@ -133,6 +167,8 @@ test.describe('meeting room: live media', () => {
       await expect(
         sarah.getByTestId('meeting-tile').filter({ hasText: 'Alex' }),
       ).toBeVisible({ timeout: 45_000 });
+      await assertReceivingFrames(alex, 'Sarah');
+      await assertReceivingFrames(sarah, 'Alex');
     } finally {
       await alexContext.close();
       await sarahContext.close();

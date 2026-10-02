@@ -6,40 +6,9 @@ import { MeetingRoom } from './MeetingRoom';
 import { SectionCard } from '@/components/SectionCard';
 import { Avatar } from '@/components/Avatar';
 import { api, type MeetingDto } from '@/lib/api';
+import { toRoomMeeting, type TranscriptMessage } from '@/lib/meetings';
 import { useApiData } from '@/lib/useApiData';
 import { formatTime, initials, relativeTime, APP_TIME_ZONE } from '@/lib/format';
-import type { Meeting } from '@/lib/data';
-
-/**
- * Bridges the API's meeting shape to the one `MeetingRoom` renders.
- *
- * `MeetingRoom` was written against the fixture type, which carries ids and an
- * inline message array. Rather than rewrite the room for a DTO, the fields it reads
- * are mapped here -- one place, in the direction that lets the untouched component
- * stay untouched.
- *
- * `participantIds` and `messages` are filled from the joined participant list and the
- * detail endpoint's transcript. `activeUserId` comes from the directory rather than
- * the fixture `currentUser`, so switching persona in Settings moves the "you" in the
- * room with it.
- */
-function toRoomMeeting(meeting: MeetingDto, messages: { id: string; body: string; createdAt: string; author: { id: string } }[], activeUserId: string): Meeting {
-  return {
-    id: meeting.id,
-    title: meeting.title,
-    roomName: meeting.roomName,
-    startsAt: meeting.startsAt,
-    endsAt: meeting.endsAt,
-    organizerId: meeting.organizerId,
-    participantIds: meeting.participants.map((p) => p.id),
-    messages: messages.map((message) => ({
-      id: message.id,
-      authorId: message.author.id,
-      body: message.body,
-      createdAt: message.createdAt,
-    })),
-  };
-}
 
 export function MeetingsView({ initialRoomId }: { initialRoomId?: string }) {
   const [roomId, setRoomId] = useState<string | null>(initialRoomId ?? null);
@@ -81,7 +50,7 @@ export function MeetingsView({ initialRoomId }: { initialRoomId?: string }) {
    * transcript. `null` while closed rather than an empty object, because the two mean
    * different things to `MeetingRoom`.
    */
-  const detail = useApiData<{ messages: { id: string; body: string; createdAt: string; author: { id: string } }[] } | null>(
+  const detail = useApiData<{ messages: TranscriptMessage[] } | null>(
     'meetings:detail',
     async (signal) => {
       if (!roomId) return null;
@@ -104,7 +73,7 @@ export function MeetingsView({ initialRoomId }: { initialRoomId?: string }) {
     if (!roomId || !activeUserId) return null;
     const meeting = list.find((m) => m.id === roomId);
     if (!meeting) return null;
-    return toRoomMeeting(meeting, detail.data?.messages ?? [], activeUserId);
+    return toRoomMeeting(meeting, detail.data?.messages ?? []);
   }, [roomId, activeUserId, list, detail.data]);
 
   if (room) {

@@ -22,17 +22,19 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Hash, X, ChevronLeft } from 'lucide-react';
+import { Hash, X, ChevronLeft, Phone, Video } from 'lucide-react';
 import { PersonAvatar } from '@/components/profile/PersonAvatar';
 import { useActivePerson } from '@/components/profile/ProfileProvider';
 import { MessageRow } from './MessageRow';
 import { Composer } from './Composer';
 import { TypingIndicator } from './TypingIndicator';
+import { MeetingRoom } from '@/components/meetings/MeetingRoom';
 import type { DisplayMessage, PendingAttachment, TypingPeer } from './types';
-import { api, ApiError, type ChatMessage as LiveMessage, type FileRow } from '@/lib/api';
+import { api, ApiError, type ChatMessage as LiveMessage, type FileRow, type MeetingDto } from '@/lib/api';
 import { RealtimeClient, type RealtimeStatus } from '@/lib/realtime';
+import { toRoomMeeting } from '@/lib/meetings';
 import { relativeTime, formatBytes } from '@/lib/format';
-import type { Channel, ChatMessage, Person } from '@/lib/data';
+import type { Channel, ChatMessage, Meeting, Person } from '@/lib/data';
 
 type Thread = 'chat' | 'files' | 'meetings';
 
@@ -164,6 +166,94 @@ export function ChatClient({
     const timer = setInterval(() => setNow(Date.now()), TICK_MS);
     return () => clearInterval(timer);
   }, []);
+
+  /* ---------------------------------------------------------------- */
+  /* Calls, opened from the channel itself                            */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * The call opened from this channel, held here rather than navigated to.
+   *
+   * This is the same room the meetings screen opens -- one component, one
+   * connection, one set of controls -- so a call started from chat and one started
+   * from the meetings list behave identically. Rendering it over the chat rather than
+   * navigating away is deliberate: leaving the conversation to make a call is the
+   * thing people expect not to have to do.
+   */
+  const [call, setCall] = useState<Meeting | null>(null);
+  const [startingCall, setStartingCall] = useState(false);
+  const [callError, setCallError] = useState<string | null>(null);
+
+  /**
+   * Opens (or rejoins) this channel's call.
+   *
+   * Idempotent on the server, so pressing this twice -- or pressing it after a
+   * colleague has already started one -- lands everyone in the same room rather than
+   * creating a second one nobody can find.
+   */
+  const startCall = useCallback(async () => {
+    const channelId = active?.id;
+    if (!channelId || startingCall) return;
+
+    setStartingCall(true);
+    setCallError(null);
+    try {
+      const response = await api.startChannelCall(channelId);
+      setCall(toRoomMeeting(response.meeting, []));
+    } catch (cause) {
+      setCallError(
+        cause instanceof ApiError ? cause.message : 'That call could not be started.',
+      );
+    } finally {
+      setStartingCall(false);
+    }
+  }, [active?.id, startingCall]);
+
+  // Switching channels closes the call rather than leaving it running behind a
+  // different conversation: the room belongs to the channel it was opened from, and
+  // `MeetingRoom` only tears down its connection on unmount.
+  useEffect(() => {
+    setCall(null);
+    setCallError(null);
+  }, [active?.id]);
+
+  /**
+   * Whether this channel already has a call, for the Meetings tab.
+   *
+   * Found by looking for the channel's derived room name in the caller's upcoming
+   * meetings, rather than by asking the server to create one. Rendering a tab should
+   * not have the side effect of opening a room -- reading the list is idempotent,
+   * posting to `/api/meetings` is not.
+   *
+   * Re-read when `call` changes, so starting a call from the header immediately
+   * shows up here rather than needing a reload.
+   */
+  const [channelCall, setChannelCall] = useState<MeetingDto | null>(null);
+
+  useEffect(() => {
+    const channelId = active?.id;
+    if (!channelId) {
+      setChannelCall(null);
+      return;
+    }
+
+    let cancelled = false;
+    const roomName = `channel-${channelId}`;
+
+    void api
+      .meetings({ scope: 'upcoming', limit: 50 })
+      .then((response) => {
+        if (cancelled) return;
+        setChannelCall(response.meetings.find((m) => m.roomName === roomName) ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setChannelCall(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [active?.id, call]);
 
   useEffect(() => {
     if (!active) return;
@@ -775,7 +865,44 @@ const name =
           </button>
           <strong>#{active?.name}</strong>
           <span className="unread">{members.length} members</span>
+
+          {/*
+            Start a call in this channel.
+
+            The same action as the video button, and separated rather than merged
+            because the two send different things: an audio call joins muted, a video
+            call asks for the camera. Both go to the same standing room for this
+            channel, so a colleague pressing either lands in the same place.
+          */}
+          <div className="panel-head-calls">
+            <button
+              className="icon-btn"
+              type="button"
+              onClick={() => void startCall()}
+              disabled={!active || startingCall}
+              aria-label={`Start audio call in #${active?.name ?? 'channel'}`}
+              title="Start audio call"
+            >
+              <Phone size={15} />
+            </button>
+            <button
+              className="icon-btn"
+              type="button"
+              onClick={() => void startCall()}
+              disabled={!active || startingCall}
+              aria-label={`Start video call in #${active?.name ?? 'channel'}`}
+              title="Start video call"
+            >
+              <Video size={16} />
+            </button>
+          </div>
         </div>
+
+        {callError && (
+          <p className="call-error" role="alert">
+            {callError}
+          </p>
+        )}
 
         <div className="list-tabs">
           {THREADS.map((option) => (
@@ -923,8 +1050,37 @@ const name =
         */}
         {thread === 'meetings' && (
           <div className="empty-state">
-            <p>Meeting chat opens inside the room.</p>
-            <span className="empty-meta">Join a meeting to read or post there</span>
+            {channelCall ? (
+              <>
+                <p>A call is open in #{active?.name}.</p>
+                <span className="empty-meta">
+                  {channelCall.participantCount}{' '}
+                  {channelCall.participantCount === 1 ? 'person has' : 'people have'} the room
+                </span>
+                <button
+                  type="button"
+                  className="join"
+                  onClick={() => setCall(toRoomMeeting(channelCall, []))}
+                  aria-label={`Join the call in #${active?.name}`}
+                >
+                  <Video size={14} /> Join call
+                </button>
+              </>
+            ) : (
+              <>
+                <p>No call is open in #{active?.name} yet.</p>
+                <span className="empty-meta">Start one and it appears here for everyone</span>
+                <button
+                  type="button"
+                  className="join"
+                  onClick={() => void startCall()}
+                  disabled={startingCall}
+                  aria-label={`Start a call in #${active?.name}`}
+                >
+                  <Video size={14} /> Start a call
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -954,6 +1110,25 @@ const name =
           ))}
         </div>
       </div>
+
+      {/*
+        The call, over the chat.
+
+        The same `MeetingRoom` the meetings screen renders, so there is one
+        implementation of connecting, the device controls and in-call chat. It is
+        keyed on the channel's room name so switching channels mounts a fresh room --
+        `MeetingRoom` only tears its connection down on unmount.
+      */}
+      {call && (
+        <div className="call-overlay" data-testid="call-overlay">
+          <MeetingRoom
+            key={call.roomName}
+            meeting={call}
+            currentUserId={currentUserId}
+            onLeave={() => setCall(null)}
+          />
+        </div>
+      )}
     </div>
   );
 }
