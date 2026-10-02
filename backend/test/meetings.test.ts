@@ -50,6 +50,19 @@ type MeetingRow = {
   ended: boolean;
 };
 
+type MeetingMessage = {
+  id: string;
+  body: string;
+  meetingId: string | null;
+  channelId: string;
+  authorId: string;
+  createdAt: string;
+  deleted: boolean;
+  editedAt: string | null;
+  parentId: string | null;
+  parentAuthor: string | null;
+};
+
 type ListBody = {
   meetings: MeetingRow[];
   scope: string;
@@ -235,7 +248,7 @@ describe('meetings: past and upcoming come from the clock', () => {
 
 describe('meetings: the transcript', () => {
   it('returns meeting messages oldest-first, and excludes the calendar rows', async () => {
-    const id = await makeMeeting({ participantIds: ['u1'] });
+    const id = await makeMeeting({ participantIds: ['u1'], hoursFromNow: -48 });
 
     await prisma.message.createMany({
       data: [
@@ -259,7 +272,7 @@ describe('meetings: the transcript', () => {
   });
 
   it('hides a soft-deleted message rather than showing an empty bubble', async () => {
-    const id = await makeMeeting({ participantIds: ['u1'] });
+    const id = await makeMeeting({ participantIds: ['u1'], hoursFromNow: -48 });
 
     await prisma.message.createMany({
       data: [
@@ -284,7 +297,7 @@ describe('meetings: the transcript', () => {
   });
 
   it('returns no transcript rather than another meeting\'s', async () => {
-    const mine = await makeMeeting({ participantIds: ['u1'] });
+    const mine = await makeMeeting({ participantIds: ['u1'], hoursFromNow: -48 });
     const theirs = await makeMeeting({ participantIds: ['u3'], organizerId: 'u3' });
 
     await prisma.message.create({
@@ -317,7 +330,7 @@ describe('meetings: the join link is a meeting', () => {
   });
 
   it('reports how many participants without the caller having to count the array', async () => {
-    const id = await makeMeeting({ participantIds: ['u1'] });
+    const id = await makeMeeting({ participantIds: ['u1'], hoursFromNow: -48 });
 
     await prisma.meetingParticipant.create({ data: { meetingId: id, userId: 'u2' } });
     await prisma.meetingParticipant.create({ data: { meetingId: id, userId: 'u3' } });
@@ -344,6 +357,153 @@ describe('meetings: bounds', () => {
 
   it('rejects an unexpected query parameter rather than ignoring it', async () => {
     assert.equal((await employee.get('/api/meetings?showAll=true')).status, 400);
+  });
+});
+
+describe('meetings: the transcript is persisted and participant-scoped', () => {
+  it('requires a session to read', async () => {
+    const id = await makeMeeting({ participantIds: ['u1'], hoursFromNow: -48 });
+    assert.equal((await harness.client().get(`/api/meetings/${id}/messages`)).status, 401);
+  });
+
+  it('requires a session to post', async () => {
+    const id = await makeMeeting({ participantIds: ['u1'], hoursFromNow: -48 });
+    const response = await harness.client().post(`/api/meetings/${id}/messages`, { body: 'hi' });
+    assert.equal(response.status, 401);
+  });
+
+  it('posts a message that survives the call ending', async () => {
+    const id = await makeMeeting({ participantIds: ['u1'], hoursFromNow: -48 });
+
+    const response = await employee.post(`/api/meetings/${id}/messages`, { body: '  shipping now  ' });
+    assert.equal(response.status, 201);
+
+    const body = await readJson<{ message: MeetingMessage }>(response);
+    assert.equal(body.message.body, 'shipping now');
+    // The scope travels with the row. This is what the socket relay routes on, and
+    // what lets the UI tell an in-call message from a channel one.
+    assert.equal(body.message.meetingId, id);
+    assert.equal(body.message.channelId, '');
+
+    // Read back through the paginated transcript, not just the POST response.
+    const listed = await employee.getJson<{ messages: MeetingMessage[] }>(
+      `/api/meetings/${id}/messages`,
+    );
+    assert.deepEqual(
+      listed.messages.map((m) => m.body),
+      ['shipping now'],
+    );
+  });
+
+  it('will not post to a meeting the caller is not in', async () => {
+    const id = await makeMeeting({ participantIds: ['u1'], hoursFromNow: -48 });
+
+    // 404 rather than 403: a meeting you are not in is indistinguishable from one
+    // that does not exist.
+    assert.equal((await outsider.post(`/api/meetings/${id}/messages`, { body: 'hi' })).status, 404);
+    assert.equal((await outsider.get(`/api/meetings/${id}/messages`)).status, 404);
+  });
+
+  it('will not read a meeting that does not exist', async () => {
+    assert.equal((await employee.get('/api/meetings/no-such-meeting/messages')).status, 404);
+  });
+
+  it('refuses an empty message rather than storing an unreadable row', async () => {
+    const id = await makeMeeting({ participantIds: ['u1'], hoursFromNow: -48 });
+
+    assert.equal((await employee.post(`/api/meetings/${id}/messages`, { body: '   ' })).status, 400);
+
+    const listed = await employee.getJson<{ messages: MeetingMessage[] }>(
+      `/api/meetings/${id}/messages`,
+    );
+    assert.equal(listed.messages.length, 0);
+  });
+
+  it('will not attach a reply to a parent in another conversation', async () => {
+    const here = await makeMeeting({ participantIds: ['u1'], hoursFromNow: -48 });
+    const there = await makeMeeting({ participantIds: ['u1'], hoursFromNow: -48 });
+
+    const parent = await employee.postJson<{ message: MeetingMessage }>(
+      `/api/meetings/${there}/messages`,
+      { body: 'over here' },
+    );
+
+    const response = await employee.post(`/api/meetings/${here}/messages`, {
+      body: 'me too',
+      parentId: parent.message.id,
+    });
+    assert.equal(response.status, 400);
+  });
+
+  it('keeps the two conversations apart', async () => {
+    const a = await makeMeeting({ participantIds: ['u1'], hoursFromNow: -48 });
+    const b = await makeMeeting({ participantIds: ['u1'], hoursFromNow: -48 });
+
+    await employee.postJson(`/api/meetings/${a}/messages`, { body: 'in a' });
+    await employee.postJson(`/api/meetings/${b}/messages`, { body: 'in b' });
+
+    const inA = await employee.getJson<{ messages: MeetingMessage[] }>(`/api/meetings/${a}/messages`);
+    assert.deepEqual(
+      inA.messages.map((m) => m.body),
+      ['in a'],
+    );
+  });
+
+  it('pages the transcript with an opaque cursor', async () => {
+    const id = await makeMeeting({ participantIds: ['u1'], hoursFromNow: -48 });
+    // Posted in this order, and asserted against in this order. `cuid` increases
+    // within a millisecond, so insertion order is the tiebreak the cursor relies on.
+    const posted = ['one', 'two', 'three'];
+    const rank = (body: string) => posted.indexOf(body);
+    for (const body of posted) {
+      await employee.postJson(`/api/meetings/${id}/messages`, { body });
+    }
+
+    /**
+     * Walks every page rather than asserting one page's contents.
+     *
+     * Which rows land on the first page depends on how `createdAt` granularity falls
+     * across these three inserts, so pinning "page one is one and two" would be a
+     * test of the clock. The invariant that actually matters -- and the reason the
+     * cursor is keyed on `(createdAt, id)` rather than the timestamp -- is that
+     * reading the whole transcript loses nothing and repeats nothing.
+     */
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+
+    do {
+      const page: { messages: MeetingMessage[]; nextCursor: string | null } =
+        await employee.getJson(
+          `/api/meetings/${id}/messages?limit=2${
+            cursor ? `&before=${encodeURIComponent(cursor)}` : ''
+          }`,
+        );
+      // Oldest-first within a page, which is the order a transcript reads in.
+      const bodies = page.messages.map((m) => m.body);
+      assert.deepEqual(
+        bodies,
+        [...bodies].sort((a, b) => rank(a) - rank(b)),
+        'each page reads oldest-first',
+      );
+      seen.push(...bodies);
+      cursor = page.nextCursor;
+      pages += 1;
+    } while (cursor && pages < 10);
+
+    assert.deepEqual(
+      seen.sort((a, b) => rank(a) - rank(b)),
+      posted,
+    );
+    assert.equal(new Set(seen).size, 3, 'no message appears on two pages');
+    assert.equal(cursor, null, 'the last page reports the history is exhausted');
+  });
+
+  it('rejects a broken cursor instead of silently returning everything', async () => {
+    const id = await makeMeeting({ participantIds: ['u1'], hoursFromNow: -48 });
+
+    const response = await employee.get(`/api/meetings/${id}/messages?before=not-a-cursor`);
+    assert.equal(response.status, 400);
   });
 });
 
@@ -419,7 +579,15 @@ describe('meetings: the join token', () => {
  * A throwaway team + channel, so each test below owns its channel and therefore its
  * derived `roomName`. Without that the tests would share one standing room through the
  * idempotent-reopen path and assert against each other's leftovers.
+ *
+ * Ids are collected so they can be deleted in the cleanup hook: the standing-room tests
+ * deliberately create meetings that have not ended yet, and a shared development
+ * database keeps them. Left behind they would appear in every later `scope=upcoming`
+ * listing -- and since they start four hours out, sooner than anything else the suite
+ * creates, they would quietly reorder the "soonest meeting comes first" assertions.
  */
+const throwawayChannels: string[] = [];
+
 async function makeChannel(memberIds: string[]): Promise<string> {
   const suffix = Math.random().toString(36).slice(2, 10);
   const team = await prisma.team.create({
@@ -431,8 +599,21 @@ async function makeChannel(memberIds: string[]): Promise<string> {
   const channel = await prisma.channel.create({
     data: { name: `room-${suffix}`, teamId: team.id },
   });
+  throwawayChannels.push(channel.id);
   return channel.id;
 }
+
+after(async () => {
+  // Meetings first: `Message.meetingId` cascades from the meeting, and the rooms
+  // reference the channels by name rather than by foreign key, so ordering matters.
+  await prisma.meeting.deleteMany({
+    where: { roomName: { in: throwawayChannels.map((id) => `channel-${id}`) } },
+  });
+  // Deleting the team cascades to its channels and its memberships.
+  await prisma.team.deleteMany({
+    where: { channels: { some: { id: { in: throwawayChannels } } } },
+  });
+});
 
 describe('meetings: a channel has one standing call room', () => {
   it('requires a session', async () => {

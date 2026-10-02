@@ -6,6 +6,9 @@
  * - `GET  /`             the caller's meetings, upcoming or past
  * - `POST /`             open or rejoin a channel's standing call room
  * - `GET  /:id`          one meeting, with its participants and recent messages
+ * - `GET  /:id/messages` the transcript, paginated
+ * - `POST /:id/messages` post to the transcript
+ * - `POST /:id/token`    mint a LiveKit join token
  *
  * ## Scoping is a participant check, not a flag
  *
@@ -27,11 +30,15 @@
  * ## Messages belong to the meeting, not to a channel
  *
  * `Message.channelId` and `Message.meetingId` are both nullable and mutually
- * exclusive in practice. Meeting chat is exposed here through the meeting detail
- * rather than through `/messages`, because that endpoint requires a `channelId` on
+ * exclusive in practice. Meeting chat is exposed here, through `/:id/messages`, rather
+ * than through `/api/messages`, because that endpoint requires a `channelId` on
  * purpose -- widening it to accept a meeting id would make every channel-scoped
- * permission question ambiguous. In-call chat uses the stored transcript rather than
- * LiveKit data channels, so it survives a room with no media connected.
+ * permission question ambiguous.
+ *
+ * In-call chat uses the stored transcript rather than LiveKit data channels, so it
+ * survives a room with no media connected, and a participant who arrives after the call
+ * can still read what was said. Writes go to the database and publish
+ * `meeting.message.created`, which the socket relay routes by `meetingId`.
  *
  * ## Join tokens
  *
@@ -67,12 +74,14 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../db.js';
-import { notFound, HttpError } from '../http/errors.js';
+import { notFound, badRequest, HttpError } from '../http/errors.js';
+import { cursorWhere, decodeCursor, nextCursorFrom } from '../http/cursor.js';
 import { sendJson } from '../serialise.js';
 import { requireAuth } from '../middleware/session.js';
 import { livekitConfigured } from '../config.js';
 import { issueMeetingToken } from '../livekit/token.js';
-import { toMeetingDto } from '../dto.js';
+import { publish } from '../realtime/bus.js';
+import { toMeetingDto, toMessageDto } from '../dto.js';
 
 /** How far back `scope=past` looks before it is not worth listing. */
 const MAX_PAST_DAYS = 120;
@@ -110,6 +119,58 @@ const createBody = z
  * accumulate a permanent row per channel.
  */
 const ADHOC_WINDOW_MS = 4 * 60 * 60 * 1000;
+
+/**
+ * The transcript window.
+ *
+ * The meeting detail already carries the last 50 messages for a room you are about to
+ * open, so the paginated read exists for scrolling back further than that -- and both
+ * are scoped to meetings the caller is a participant in.
+ */
+const transcriptQuery = z
+  .object({
+    before: z.string().max(200).optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+  })
+  .strict();
+
+const transcriptPost = z
+  .object({
+    body: z.string().max(4000),
+    parentId: z.string().min(1).max(64).optional(),
+  })
+  .strict();
+
+/** Same shape as the channel thread's select, so one DTO renders both. */
+const messageSelect = {
+  id: true,
+  channelId: true,
+  meetingId: true,
+  userId: true,
+  body: true,
+  createdAt: true,
+  editedAt: true,
+  deletedAt: true,
+  parentId: true,
+  parent: { select: { userId: true, user: { select: { name: true } } } },
+  reactions: { select: { emoji: true, userId: true } },
+  attachments: { select: { id: true, name: true, sizeBytes: true, mimeType: true } },
+} as const;
+
+/**
+ * Asserts the caller is a participant, and returns the meeting's id.
+ *
+ * Participant-scoped exactly like every other read in this router, and a 404 rather
+ * than a 403 so a meeting you are not in is indistinguishable from one that does not
+ * exist. Throws, so a caller cannot forget the check.
+ */
+async function assertParticipant(userId: string, meetingId: string): Promise<void> {
+  const row = await prisma.meeting.findFirst({
+    where: { id: meetingId, participants: { some: { userId } } },
+    select: { id: true },
+  });
+  if (!row) throw notFound('No such meeting.');
+}
 
 /**
  * Participant columns.
@@ -312,6 +373,88 @@ export function meetingsRouter() {
       messages,
       messagesTruncated: row.messages.length === 50,
     });
+  });
+
+  /**
+   * The meeting transcript, paginated.
+   *
+   * `Message.meetingId` and `Message.channelId` are mutually exclusive in practice, so
+   * this is the channel read with a different scope -- and deliberately a separate
+   * endpoint rather than a widened `/api/messages`, because widening that one to
+   * accept either id would make every channel-scoped permission question ambiguous.
+   */
+  router.get('/:id/messages', requireAuth, async (req, res) => {
+    const { id } = z.object({ id: z.string().min(1).max(64) }).parse(req.params);
+    const query = transcriptQuery.parse(req.query);
+
+    await assertParticipant(req.user!.id, id);
+
+    const rows = await prisma.message.findMany({
+      where: {
+        meetingId: id,
+        // A tombstone keeps its row so the transcript's positions hold, so it is
+        // excluded here rather than returned as an empty bubble.
+        deletedAt: null,
+        ...cursorWhere(decodeCursor(query.before)),
+      },
+      select: messageSelect,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: query.limit,
+    });
+
+    sendJson(res, 200, {
+      messages: [...rows].reverse().map(toMessageDto),
+      nextCursor: nextCursorFrom(rows, query.limit),
+    });
+  });
+
+  /**
+   * Post to the meeting transcript.
+   *
+   * Persisted rather than held in the room's memory, so it survives the call ending and
+   * is readable by someone who joins afterwards. `Message.meetingId` already existed,
+   * which is why this route needs no migration.
+   */
+  router.post('/:id/messages', requireAuth, async (req, res) => {
+    const { id } = z.object({ id: z.string().min(1).max(64) }).parse(req.params);
+    const body = transcriptPost.parse(req.body ?? {});
+
+    const trimmed = body.body.trim();
+    // Empty is refused rather than allowed: in-call chat has no attachment path yet,
+    // so an empty row here would be a message the reader can never see content in.
+    if (!trimmed) throw badRequest('empty_message', 'A message needs some text.');
+
+    await assertParticipant(req.user!.id, id);
+
+    // Validated before writing, for the same reason as a channel reply: a parent from
+    // another conversation would create a thread belonging to two of them.
+    if (body.parentId) {
+      const parent = await prisma.message.findUnique({
+        where: { id: body.parentId },
+        select: { meetingId: true },
+      });
+      if (!parent) throw notFound('No such message to reply to.');
+      if (parent.meetingId !== id) {
+        throw badRequest('parent_in_other_meeting', 'A reply must be in the same meeting as its parent.');
+      }
+    }
+
+    const row = await prisma.message.create({
+      data: {
+        meetingId: id,
+        userId: req.user!.id,
+        body: trimmed,
+        parentId: body.parentId,
+      },
+      select: messageSelect,
+    });
+
+    const dto = toMessageDto(row);
+    // Carries `meetingId` rather than `channelId`, so the relay routes it to the room
+    // and it cannot be mistaken for channel traffic.
+    publish({ type: 'meeting.message.created', meetingId: id, message: dto });
+
+    sendJson(res, 201, { message: dto });
   });
 
   /**

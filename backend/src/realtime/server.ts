@@ -8,7 +8,7 @@
  * ## Shape of the protocol
  *
  * Client to server:
- *   { type: 'subscribe',   payload: { channelIds: string[] } }
+ *   { type: 'subscribe',   payload: { channelIds: string[], meetingIds: string[] } }
  *   { type: 'typing.start', payload: { channelId: string } }
  *   { type: 'typing.stop',  payload: { channelId: string } }
  *   { type: 'ping' }
@@ -58,6 +58,15 @@ type Client = {
   socket: WebSocket;
   userId: string;
   channels: Set<string>;
+  /**
+   * Meetings this socket asked to follow, checked the same way as channels.
+   *
+   * Separate from `channels` rather than folded into it because the two are
+   * authorised differently and joined from different places: a meeting is reachable
+   * only by being a participant in it, which is a row that exists and can be
+   * revoked, whereas channel access follows team membership.
+   */
+  meetings: Set<string>;
   alive: boolean;
 };
 
@@ -110,6 +119,7 @@ export function attachRealtime(server: HttpServer): RealtimeHandle {
       socket,
       userId,
       channels: new Set(),
+      meetings: new Set(),
       alive: true,
     };
     clients.add(client);
@@ -152,12 +162,31 @@ export function attachRealtime(server: HttpServer): RealtimeHandle {
    */
   const unsubscribeBus = subscribe((event: RealtimeEvent) => {
     for (const client of clients) {
-      // `file.created` carries a null channel when the upload was not attached to
-      // one, and a client subscribed to channels has no way to receive it. It is
-      // dropped rather than fanned out to everyone, which would be a leak.
-      if (event.channelId === null) continue;
-      if (!client.channels.has(event.channelId)) continue;
+      // Meeting events go only to sockets following that meeting. Checked first,
+      // because a meeting id is not a channel id and would otherwise fall through to
+      // the channel check below and match nothing -- or, worse, match by accident.
+      if ('meetingId' in event) {
+        if (!client.meetings.has(event.meetingId)) continue;
+      } else if ('channelId' in event) {
+        // `file.created` carries a null channel when the upload was not attached to
+        // one, and a client subscribed to channels has no way to receive it. It is
+        // dropped rather than fanned out to everyone, which would be a leak.
+        if (event.channelId === null) continue;
+        if (!client.channels.has(event.channelId)) continue;
+      } else {
+        continue;
+      }
+
       if (event.type === 'message.created' && event.message && isOwnMessage(event.message, client)) {
+        continue;
+      }
+      // Same reasoning for the meeting equivalent: the author already has the row
+      // from the POST that created it.
+      if (
+        event.type === 'meeting.message.created' &&
+        event.message &&
+        isOwnMessage(event.message, client)
+      ) {
         continue;
       }
       send(client, event.type, event);
@@ -214,16 +243,27 @@ export function attachRealtime(server: HttpServer): RealtimeHandle {
         return;
 
       case 'subscribe': {
-        const requested = Array.isArray(payload.channelIds)
+        const channels = Array.isArray(payload.channelIds)
           ? payload.channelIds.filter((id): id is string => typeof id === 'string')
+          : [];
+        const meetings = Array.isArray(payload.meetingIds)
+          ? payload.meetingIds.filter((id): id is string => typeof id === 'string')
           : [];
 
         // Subscription is not a claim of membership. An unauthorised socket could
-        // otherwise name any channel id and start receiving its traffic, which
-        // makes the token check above pointless.
-        const allowed = await allowedChannelIds(client.userId, requested);
-        client.channels = new Set(allowed);
-        send(client, 'subscribed', { channelIds: allowed });
+        // otherwise name any id and start receiving its traffic, which makes the
+        // token check above pointless.
+        const [allowedChannels, allowedMeetings] = await Promise.all([
+          allowedChannelIds(client.userId, channels),
+          allowedMeetingIds(client.userId, meetings),
+        ]);
+
+        client.channels = new Set(allowedChannels);
+        client.meetings = new Set(allowedMeetings);
+        send(client, 'subscribed', {
+          channelIds: allowedChannels,
+          meetingIds: allowedMeetings,
+        });
         return;
       }
 
@@ -269,6 +309,17 @@ async function allowedChannelIds(userId: string, requested: string[]): Promise<s
 
   const rows = await prisma.channel.findMany({
     where: { id: { in: requested }, team: { members: { some: { userId } } } },
+    select: { id: true },
+  });
+  return rows.map((row) => row.id);
+}
+
+/** Meeting ids the user may subscribe to, because they are a participant in one. */
+async function allowedMeetingIds(userId: string, requested: string[]): Promise<string[]> {
+  if (requested.length === 0) return [];
+
+  const rows = await prisma.meeting.findMany({
+    where: { id: { in: requested }, participants: { some: { userId } } },
     select: { id: true },
   });
   return rows.map((row) => row.id);

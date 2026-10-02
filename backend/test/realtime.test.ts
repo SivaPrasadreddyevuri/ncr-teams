@@ -332,3 +332,182 @@ describe('presence', () => {
     assert.equal(statusOf('u1'), 'online');
   });
 });
+
+describe('realtime: meetings', () => {
+  /**
+   * A meeting both demo users are in, created directly so the subscription checks
+   * have something to pass. Deleted in `finally` because the test database is shared.
+   */
+  async function makeSharedMeeting(): Promise<string> {
+    const meeting = await prisma.meeting.create({
+      data: {
+        title: 'Socket Test Call',
+        roomName: `rt-${Math.random().toString(36).slice(2, 10)}`,
+        organizerId: 'u1',
+        startsAt: new Date(Date.now() - 3_600_000),
+        endsAt: new Date(Date.now() + 3_600_000),
+        participants: { create: [{ userId: 'u1' }, { userId: 'u2' }] },
+      },
+      select: { id: true },
+    });
+    return meeting.id;
+  }
+
+  it('acknowledges only the meetings the user is a participant in', async () => {
+    const mine = await prisma.meeting.create({
+      data: {
+        title: 'Mine',
+        roomName: `rt-mine-${Math.random().toString(36).slice(2, 10)}`,
+        organizerId: 'u1',
+        startsAt: new Date(),
+        endsAt: new Date(Date.now() + 3_600_000),
+        participants: { create: [{ userId: 'u1' }] },
+      },
+      select: { id: true },
+    });
+
+    // u2 is not a participant, so this must not be acknowledged.
+    const theirs = await prisma.meeting.create({
+      data: {
+        title: 'Theirs',
+        roomName: `rt-theirs-${Math.random().toString(36).slice(2, 10)}`,
+        organizerId: 'u2',
+        startsAt: new Date(),
+        endsAt: new Date(Date.now() + 3_600_000),
+        participants: { create: [{ userId: 'u2' }] },
+      },
+      select: { id: true },
+    });
+
+    try {
+      const socket = await connect(EMPLOYEE);
+      socket.send('subscribe', { meetingIds: [mine.id, theirs.id] });
+
+      const subscribed = await socket.waitForType('subscribed');
+      // Subscription is not a claim of participation -- otherwise any authenticated
+      // socket could name any meeting id and read its transcript.
+      assert.deepEqual(subscribed.payload.meetingIds, [mine.id]);
+    } finally {
+      await prisma.meeting.delete({ where: { id: mine.id } });
+      await prisma.meeting.delete({ where: { id: theirs.id } });
+    }
+  });
+
+  it('delivers an in-call message to the other participant', async () => {
+    const meetingId = await makeSharedMeeting();
+    const sender = await connect(EMPLOYEE);
+    const receiver = await connect(SECOND_EMPLOYEE);
+
+    for (const socket of [sender, receiver]) {
+      socket.send('subscribe', { meetingIds: [meetingId] });
+      await socket.waitForType('subscribed');
+    }
+
+    try {
+      const post = http.post(`/api/meetings/${meetingId}/messages`, { body: 'in the room' });
+      const created = (await (await post).json()) as { message: { id: string } };
+
+      const frame = await receiver.waitForType('meeting.message.created');
+      const message = frame.payload.message as { id: string; body: string; meetingId: string };
+      assert.equal(message.id, created.message.id);
+      assert.equal(message.body, 'in the room');
+      // The frame carries the meeting it belongs to, which is what routed it.
+      assert.equal(message.meetingId, meetingId);
+    } finally {
+      await prisma.meeting.delete({ where: { id: meetingId } });
+    }
+  });
+
+  it("does not echo an in-call message back to its author", async () => {
+    const meetingId = await makeSharedMeeting();
+    const author = await connect(EMPLOYEE);
+    const other = await connect(SECOND_EMPLOYEE);
+
+    for (const socket of [author, other]) {
+      socket.send('subscribe', { meetingIds: [meetingId] });
+      await socket.waitForType('subscribed');
+    }
+
+    try {
+      await http.post(`/api/meetings/${meetingId}/messages`, { body: 'mine' });
+
+      await other.waitForType('meeting.message.created');
+      assert.equal(await author.seesNo('meeting.message.created', 400), false);
+    } finally {
+      await prisma.meeting.delete({ where: { id: meetingId } });
+    }
+  });
+
+  it('does not reach a socket that did not subscribe to the meeting', async () => {
+    const meetingId = await makeSharedMeeting();
+    const writer = await connect(EMPLOYEE);
+    const elsewhere = await connect(SECOND_EMPLOYEE);
+
+    // `elsewhere` is a participant in the meeting, but never asked to follow it.
+    // Proving they cannot read it by guessing the id is the point.
+    writer.send('subscribe', { meetingIds: [meetingId] });
+    await writer.waitForType('subscribed');
+    elsewhere.send('subscribe', { meetingIds: [] });
+    await elsewhere.waitForType('subscribed');
+
+    try {
+      await http.post(`/api/meetings/${meetingId}/messages`, { body: 'not for you' });
+      assert.equal(await elsewhere.seesNo('meeting.message.created', 400), false);
+    } finally {
+      await prisma.meeting.delete({ where: { id: meetingId } });
+    }
+  });
+
+  it('keeps a meeting message out of the channel feed', async () => {
+    const meetingId = await makeSharedMeeting();
+
+    // Both sockets are the non-author, deliberately. Using the poster's own socket
+    // for the "should not receive" side would pass for the wrong reason -- the echo
+    // suppression would hide the frame regardless of how it was routed.
+    const inRoom = await connect(SECOND_EMPLOYEE);
+    const inChannel = await connect(SECOND_EMPLOYEE);
+
+    inRoom.send('subscribe', { meetingIds: [meetingId] });
+    await inRoom.waitForType('subscribed');
+    // Following c1 is not following the meeting. A channel id and a meeting id live
+    // in separate sets precisely so neither can be mistaken for the other.
+    inChannel.send('subscribe', { channelIds: ['c1'] });
+    await inChannel.waitForType('subscribed');
+
+    try {
+      await http.post(`/api/meetings/${meetingId}/messages`, { body: 'room only' });
+
+      await inRoom.waitForType('meeting.message.created');
+      assert.equal(await inChannel.seesNo('meeting.message.created', 400), false);
+      assert.equal(await inChannel.seesNo('message.created', 400), false);
+    } finally {
+      await prisma.meeting.delete({ where: { id: meetingId } });
+    }
+  });
+
+  it('delivers an edit of an in-call message', async () => {
+    const meetingId = await makeSharedMeeting();
+    const sender = await connect(EMPLOYEE);
+    const receiver = await connect(SECOND_EMPLOYEE);
+
+    for (const socket of [sender, receiver]) {
+      socket.send('subscribe', { meetingIds: [meetingId] });
+      await socket.waitForType('subscribed');
+    }
+
+    try {
+      const post = http.post(`/api/meetings/${meetingId}/messages`, { body: 'typo' });
+      const created = (await (await post).json()) as { message: { id: string } };
+
+      await http.patch(`/api/messages/${created.message.id}`, { body: 'fixed' });
+
+      // This is what the old `if (message.channelId)` guard silently skipped: the row
+      // changed but the room kept showing the old text until a reload.
+      const frame = await receiver.waitForType('meeting.message.updated');
+      const message = frame.payload.message as { body: string };
+      assert.equal(message.body, 'fixed');
+    } finally {
+      await prisma.meeting.delete({ where: { id: meetingId } });
+    }
+  });
+});

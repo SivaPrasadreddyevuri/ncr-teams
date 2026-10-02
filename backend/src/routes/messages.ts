@@ -1,25 +1,20 @@
 /**
  * Messages.
  *
- * Cursor pagination rather than `OFFSET`. `OFFSET` re-counts from the start on
- * every page, so a message arriving mid-scroll shifts the window and the reader
- * sees a duplicate at one end and a gap at the other. The cursor here is the
- * `(createdAt, id)` pair that the last row of the previous page ended on, which
- * is stable no matter what is inserted.
- *
- * The cursor is opaque -- base64url of `createdAt|id` -- so a client cannot
- * construct an invalid one, and a future change to the sort key does not become
- * a breaking API change.
+ * Pagination lives in `http/cursor.ts`, shared with the meeting transcript: both walk
+ * the same `(createdAt, id)` pair and the tie-break on `id` is the part that is easy to
+ * get subtly wrong, so there is one implementation rather than two.
  */
 
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import { badRequest, forbidden, notFound } from '../http/errors.js';
+import { cursorWhere, decodeCursor, nextCursorFrom } from '../http/cursor.js';
 import { sendJson } from '../serialise.js';
 import { requireAuth } from '../middleware/session.js';
 import { publish } from '../realtime/bus.js';
-import { toMessageDto } from '../dto.js';
+import { toMessageDto, type MessageDto } from '../dto.js';
 
 const listQuery = z.object({
   channelId: z.string().min(1).max(64),
@@ -37,6 +32,10 @@ const listQuery = z.object({
 const messageSelect = {
   id: true,
   channelId: true,
+  // Selected so the DTO can say which conversation the message is in, and so the
+  // edit/delete/react handlers below can publish to the right scope instead of
+  // dropping a meeting message on the floor.
+  meetingId: true,
   userId: true,
   body: true,
   createdAt: true,
@@ -47,42 +46,6 @@ const messageSelect = {
   reactions: { select: { emoji: true, userId: true } },
   attachments: { select: { id: true, name: true, sizeBytes: true, mimeType: true } },
 } as const;
-
-type Cursor = { createdAt: Date; id: string } | null;
-
-/**
- * Decodes an opaque cursor.
- *
- * Returns a descriptive error rather than silently falling back to "from the
- * beginning": a client with a broken cursor would otherwise receive the whole
- * history and show it as though the scroll had worked.
- */
-function decodeCursor(raw: string | undefined): Cursor {
-  if (!raw) return null;
-
-  let decoded: string;
-  try {
-    decoded = Buffer.from(raw, 'base64url').toString('utf8');
-  } catch {
-    throw badRequest('invalid_cursor', 'The pagination cursor is not valid.');
-  }
-
-  // Split on the last '|', so an id containing a pipe cannot break the parse.
-  const separator = decoded.lastIndexOf('|');
-  if (separator === -1) throw badRequest('invalid_cursor', 'The pagination cursor is not valid.');
-
-  const createdAt = new Date(decoded.slice(0, separator));
-  const id = decoded.slice(separator + 1);
-  if (Number.isNaN(createdAt.getTime()) || !id) {
-    throw badRequest('invalid_cursor', 'The pagination cursor is not valid.');
-  }
-
-  return { createdAt, id };
-}
-
-function encodeCursor(createdAt: Date, id: string): string {
-  return Buffer.from(`${createdAt.toISOString()}|${id}`, 'utf8').toString('base64url');
-}
 
 /** Whether the caller belongs to the team owning this channel. */
 async function assertCanPostToChannel(userId: string, channelId: string): Promise<void> {
@@ -102,6 +65,41 @@ async function assertCanPostToChannel(userId: string, channelId: string): Promis
   if (!member) throw forbidden('You are not a member of this team.');
 }
 
+/**
+ * Publishes an edit or a deletion to whichever conversation the message is in.
+ *
+ * The guard used to be `if (message.channelId)`, which silently skipped every meeting
+ * message: the row changed but nobody was told, so a room kept rendering the old text
+ * until someone reloaded. A message belongs to a channel or a meeting and the two are
+ * separate conversations, so the scope is taken from the row rather than assumed.
+ *
+ * A message with neither is not publishable -- which cannot happen, since `Message`
+ * requires one of the two in practice -- and dropping it is the right failure: a
+ * broadcast to no scope is a no-op, not a leak.
+ */
+function publishMessageEvent(
+  kind: 'updated' | 'deleted',
+  message: { id: string; channelId: string | null; meetingId: string | null },
+  dto?: MessageDto,
+): void {
+  if (message.channelId) {
+    publish(
+      kind === 'updated'
+        ? { type: 'message.updated', channelId: message.channelId, message: dto }
+        : { type: 'message.deleted', channelId: message.channelId, messageId: message.id },
+    );
+    return;
+  }
+
+  if (message.meetingId) {
+    publish(
+      kind === 'updated'
+        ? { type: 'meeting.message.updated', meetingId: message.meetingId, message: dto }
+        : { type: 'meeting.message.deleted', meetingId: message.meetingId, messageId: message.id },
+    );
+  }
+}
+
 export function messagesRouter() {
   const router = Router();
 
@@ -114,17 +112,7 @@ export function messagesRouter() {
     const rows = await prisma.message.findMany({
       where: {
         channelId,
-        // Strictly older than the cursor, with the id breaking ties. Two
-        // messages can share a createdAt millisecond, and an `lt` on the
-        // timestamp alone would drop one of them.
-        ...(cursor
-          ? {
-              OR: [
-                { createdAt: { lt: cursor.createdAt } },
-                { createdAt: cursor.createdAt, id: { lt: cursor.id } },
-              ],
-            }
-          : {}),
+        ...cursorWhere(cursor),
       },
       select: messageSelect,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -140,15 +128,7 @@ export function messagesRouter() {
       messages: ordered.map(toMessageDto),
       // Present only when a full page came back, so the client does not ask for
       // a further page that would be empty.
-      //
-      // The cursor is the *oldest* row of this page, which is the last element
-      // of the descending result -- not the newest. Anchoring on the newest
-      // would put the next page's boundary above the row that was just returned,
-      // and that row would come back a second time.
-      nextCursor:
-        rows.length === limit
-          ? encodeCursor(rows[rows.length - 1]!.createdAt, rows[rows.length - 1]!.id)
-          : null,
+      nextCursor: nextCursorFrom(rows, limit),
     });
   });
 
@@ -236,7 +216,7 @@ export function messagesRouter() {
 
     const message = await prisma.message.findUnique({
       where: { id },
-      select: { id: true, channelId: true, userId: true, deletedAt: true },
+      select: { id: true, channelId: true, meetingId: true, userId: true, deletedAt: true },
     });
     if (!message) throw notFound('No such message.');
 
@@ -257,9 +237,7 @@ export function messagesRouter() {
       select: messageSelect,
     });
 
-    if (message.channelId) {
-      publish({ type: 'message.updated', channelId: message.channelId, message: toMessageDto(row) });
-    }
+    publishMessageEvent('updated', message, toMessageDto(row));
 
     sendJson(res, 200, { message: toMessageDto(row) });
   });
@@ -273,7 +251,7 @@ export function messagesRouter() {
 
     const message = await prisma.message.findUnique({
       where: { id },
-      select: { id: true, channelId: true, userId: true, deletedAt: true },
+      select: { id: true, channelId: true, meetingId: true, userId: true, deletedAt: true },
     });
     if (!message) throw notFound('No such message.');
 
@@ -298,9 +276,7 @@ export function messagesRouter() {
 
     const row = await prisma.message.findUniqueOrThrow({ where: { id }, select: messageSelect });
     const dto = toMessageDto(row);
-    if (message.channelId) {
-      publish({ type: 'message.updated', channelId: message.channelId, message: dto });
-    }
+    publishMessageEvent('updated', message, dto);
 
     sendJson(res, 200, { message: dto });
   });
@@ -318,7 +294,7 @@ export function messagesRouter() {
 
     const message = await prisma.message.findUnique({
       where: { id },
-      select: { id: true, channelId: true, userId: true },
+      select: { id: true, channelId: true, meetingId: true, userId: true },
     });
     if (!message) throw notFound('No such message.');
 
@@ -335,9 +311,7 @@ export function messagesRouter() {
       select: messageSelect,
     });
 
-    if (message.channelId) {
-      publish({ type: 'message.deleted', channelId: message.channelId, messageId: id });
-    }
+    publishMessageEvent('deleted', message);
 
     sendJson(res, 200, { message: toMessageDto(row) });
   });

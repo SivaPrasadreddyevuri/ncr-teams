@@ -67,6 +67,15 @@ export type AttachmentDto = { id: string; name: string; size: number; type: stri
 export type MessageDto = {
   id: string;
   channelId: string;
+  /**
+   * The meeting this message was posted in, or null for a channel message.
+   *
+   * Exactly one of `channelId` and `meetingId` is meaningful. Meeting chat is a
+   * separate conversation from the channel the call was opened from, so the client
+   * has to be able to tell them apart rather than inferring it from an empty
+   * `channelId`.
+   */
+  meetingId: string | null;
   authorId: string;
   body: string;
   createdAt: string;
@@ -140,6 +149,14 @@ export type ActivityItemDto = {
 type MessageRow = {
   id: string;
   channelId: string | null;
+  /**
+   * The meeting this message belongs to, or null for a channel message.
+   *
+   * Selected rather than left out because the DTO has to say which conversation a
+   * message is in: `channelId` alone cannot distinguish a channel message from one
+   * posted inside a call, and the realtime relay routes on exactly this field.
+   */
+  meetingId: string | null;
   userId: string;
   body: string;
   createdAt: Date;
@@ -179,6 +196,7 @@ export function toMessageDto(row: MessageRow): MessageDto {
     // fixture's `ChatMessage`, so an empty string is the honest rendering of
     // "not in a channel" for a type that cannot express it.
     channelId: row.channelId ?? '',
+    meetingId: row.meetingId ?? null,
     authorId: row.userId,
     body: row.body,
     createdAt: row.createdAt.toISOString(),

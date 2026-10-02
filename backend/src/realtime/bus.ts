@@ -18,6 +18,14 @@
  * and the fix is a Redis pub/sub fan-out at this exact seam -- the emit signature
  * would not change. With a single instance this is correct as written, and the
  * comment records that rather than leaving it to be rediscovered.
+ *
+ * ## Scope is on the event, not inferred downstream
+ *
+ * A message belongs to a channel or to a meeting, never both, so every event
+ * carries the id of whichever conversation it belongs to and the relay routes on
+ * it. Editing a meeting message therefore reaches the room's sockets, and a channel
+ * message never leaks into one -- which is the reason the scope is explicit rather
+ * than reconstructed from a nullable column at the far end.
  */
 
 import { EventEmitter } from 'node:events';
@@ -26,6 +34,9 @@ export type RealtimeEvent =
   | { type: 'message.created'; channelId: string; message: unknown }
   | { type: 'message.updated'; channelId: string; message: unknown }
   | { type: 'message.deleted'; channelId: string; messageId: string }
+  | { type: 'meeting.message.created'; meetingId: string; message: unknown }
+  | { type: 'meeting.message.updated'; meetingId: string; message: unknown }
+  | { type: 'meeting.message.deleted'; meetingId: string; messageId: string }
   | { type: 'file.created'; channelId: string | null; file: unknown };
 
 type Listener = (event: RealtimeEvent) => void;
