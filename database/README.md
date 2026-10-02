@@ -2,7 +2,7 @@
 
 Prisma 6.19 schema, migrations and demo seed for NCR Teams.
 
-**Status: built.** Six migrations, 18 models (19 tables — `File.starredBy` gets
+**Status: built.** Seven migrations, 18 models (19 tables — `File.starredBy` gets
 an implicit join table), 9 enums. The migrations apply cleanly to an empty
 database and CI replays them, seeds and verifies on every push.
 

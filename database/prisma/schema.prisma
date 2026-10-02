@@ -388,6 +388,11 @@ model File {
   teamId     String?
   channelId  String?
   messageId  String?
+  // Files shared into a call. A third nullable scope rather than a new table, because
+  // a file is one row that a reader may find through a channel, a message, or a
+  // meeting -- and a file shared in a call is still the same bytes and the same
+  // download route.
+  meetingId  String?
   uploadedById String
 
   // The draft had no folderId, so the folder tree the Files page navigates
@@ -406,15 +411,20 @@ model File {
 
   createdAt DateTime @default(now())
   uploadedBy User   @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
-  team       Team?   @relation(fields: [teamId], references: [id], onDelete: SetNull)
+team       Team?    @relation(fields: [teamId], references: [id], onDelete: SetNull)
   channel    Channel? @relation(fields: [channelId], references: [id], onDelete: SetNull)
   message    Message? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  // SetNull, like the other scopes: ending a meeting row should not destroy a file
+  // somebody may also have attached to a channel, and the file has its own
+  // `deletedAt` for removal that is actually meant to be reversible.
+  meeting    Meeting? @relation(fields: [meetingId], references: [id], onDelete: SetNull)
   folder     File?    @relation("FileFolder", fields: [folderId], references: [id], onDelete: SetNull)
   children   File[]   @relation("FileFolder")
 
   @@index([folderId])
   @@index([teamId])
   @@index([channelId])
+  @@index([meetingId])
   @@index([messageId])
   @@index([deletedAt])
 }
@@ -435,6 +445,7 @@ model Meeting {
   organizer    User                 @relation("MeetingOrganizer", fields: [organizerId], references: [id])
   participants MeetingParticipant[]
   messages     Message[]
+  files        File[]
   event        CalendarEvent?
 }
 
