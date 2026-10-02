@@ -124,6 +124,8 @@ export type FileDto = {
    */
   uploaded: boolean;
   deletedAt: string | null;
+  /** The call this file was shared into, or null for a channel or team file. */
+  meetingId: string | null;
 };
 
 export type ActivityTarget =
@@ -225,6 +227,8 @@ type FileRow = {
   isFolder: boolean;
   createdAt: Date;
   deletedAt: Date | null;
+  /** The meeting this file was shared into, or null. */
+  meetingId: string | null;
   team: { name: string | null } | null;
   starredBy: Array<{ id: string }>;
 };
@@ -244,6 +248,7 @@ export function toFileDto(row: FileRow, uploaded: boolean, viewerId: string): Fi
     starred: row.starredBy.some((user) => user.id === viewerId),
     uploaded,
     deletedAt: row.deletedAt ? row.deletedAt.toISOString() : null,
+    meetingId: row.meetingId ?? null,
   };
 }
 

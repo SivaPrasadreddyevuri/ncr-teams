@@ -38,6 +38,9 @@ const fileSelect = {
   mimeType: true,
   isFolder: true,
   createdAt: true,
+  // Selected so the DTO can say which conversation the file was shared into,
+  // and so the upload can publish on the right scope.
+  meetingId: true,
   deletedAt: true,
   content: true,
   team: { select: { name: true } },
@@ -82,6 +85,14 @@ export function filesRouter() {
          * column the listing could not filter on.
          */
         channelId: z.string().min(1).max(64).optional(),
+        /**
+         * Files shared into one call.
+         *
+         * The same question as `channelId`, asked of the other conversation type.
+         * A meeting file is not in a channel, so without this the in-call file panel
+         * had no way to ask for its own contents.
+         */
+        meetingId: z.string().min(1).max(64).optional(),
         /** Include soft-deleted rows. Off by default. */
         includeDeleted: z.coerce.boolean().default(false),
       })
@@ -95,6 +106,12 @@ export function filesRouter() {
         // root-of-channel case working rather than silently returning everything.
         folderId: query.folderId ?? null,
         ...(query.channelId ? { channelId: query.channelId } : {}),
+        // Scoped in the query by participation rather than fetched and filtered
+        // afterwards, so asking about a meeting you are not in returns nothing
+        // rather than something the caller was not entitled to see.
+        ...(query.meetingId
+          ? { meetingId: query.meetingId, meeting: { participants: { some: { userId: req.user!.id } } } }
+          : {}),
         ...(query.team ? { team: { name: query.team } } : {}),
       },
       select: fileSelect,
@@ -201,9 +218,11 @@ export function filesRouter() {
 
           let folderId: string | undefined;
           let channelId: string | undefined;
+          let meetingId: string | undefined;
           for (const [name, value] of fields) {
             if (name === 'folderId') folderId = value;
             if (name === 'channelId') channelId = value;
+            if (name === 'meetingId') meetingId = value;
           }
 
           if (folderId) {
@@ -228,6 +247,25 @@ export function filesRouter() {
             }
           }
 
+          if (meetingId) {
+            /**
+             * Participation, not existence.
+             *
+             * The other scopes check that the target exists; a meeting is different
+             * because it is not public. Without this a caller could name any meeting
+             * id and share a file into someone else's call. The check is the same
+             * participant filter every meeting read uses.
+             */
+            const participant = await prisma.meeting.findFirst({
+              where: { id: meetingId, participants: { some: { userId: req.user!.id } } },
+              select: { id: true },
+            });
+            if (!participant) {
+              fail(400, 'bad_meeting', 'That meeting does not exist.');
+              return;
+            }
+          }
+
           const row = await prisma.file.create({
             data: {
               name: originalName,
@@ -240,13 +278,21 @@ export function filesRouter() {
               uploadedById: req.user!.id,
               folderId: folderId ?? null,
               channelId: channelId ?? null,
+              meetingId: meetingId ?? null,
             },
             select: fileSelect,
           });
 
           settled = true;
           const dto = toFileDto(row, true, req.user!.id);
-          publish({ type: 'file.created', channelId: channelId ?? null, file: dto });
+          // Both scopes travel, because a file shared into a call reaches the room's
+          // sockets rather than the channel's.
+          publish({
+            type: 'file.created',
+            channelId: channelId ?? null,
+            meetingId: meetingId ?? null,
+            file: dto,
+          });
           sendJson(res, 201, { file: dto });
         } catch (error) {
           next(error);

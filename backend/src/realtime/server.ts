@@ -165,12 +165,17 @@ export function attachRealtime(server: HttpServer): RealtimeHandle {
       // Meeting events go only to sockets following that meeting. Checked first,
       // because a meeting id is not a channel id and would otherwise fall through to
       // the channel check below and match nothing -- or, worse, match by accident.
-      if ('meetingId' in event) {
+      // A meeting-scoped event reaches the sockets following that meeting. The null
+      // check matters because `file.created` carries both scopes: an upload into a
+      // channel has `meetingId: null` and must route by channel, not be dropped by a
+      // `meetings.has(null)` that can never match.
+      if ('meetingId' in event && event.meetingId !== null) {
         if (!client.meetings.has(event.meetingId)) continue;
       } else if ('channelId' in event) {
-        // `file.created` carries a null channel when the upload was not attached to
-        // one, and a client subscribed to channels has no way to receive it. It is
-        // dropped rather than fanned out to everyone, which would be a leak.
+        // `file.created` carries null for whichever scopes do not apply, and a client
+        // subscribed to one conversation has no way to receive a file for another.
+        // A file with no scope at all is dropped rather than fanned out to everyone,
+        // which would be a leak.
         if (event.channelId === null) continue;
         if (!client.channels.has(event.channelId)) continue;
       } else {

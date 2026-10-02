@@ -17,6 +17,7 @@ import { config } from '../src/config.js';
 
 type FileDto = {
   id: string;
+  meetingId: string | null;
   name: string;
   size: number;
   mimeType: string;
@@ -434,5 +435,142 @@ describe('delete', () => {
 
     const folder = await prisma.file.findUniqueOrThrow({ where: { id: 'f1' } });
     assert.ok(folder.deletedAt);
+  });
+});
+
+describe('files: sharing into a call', () => {
+  /**
+   * A meeting the demo users share, created directly so the participation checks have
+   * something to pass. Removed in `finally` because the test database is shared.
+   */
+  async function makeSharedMeeting(): Promise<string> {
+    const meeting = await prisma.meeting.create({
+      data: {
+        title: 'File Scope Call',
+        roomName: `fs-${Math.random().toString(36).slice(2, 10)}`,
+        organizerId: 'u1',
+        startsAt: new Date(Date.now() - 3_600_000),
+        endsAt: new Date(Date.now() + 3_600_000),
+        participants: { create: [{ userId: 'u1' }, { userId: 'u2' }] },
+      },
+      select: { id: true },
+    });
+    return meeting.id;
+  }
+
+  it('stores a file shared into a call, and says which call', async () => {
+    const meetingId = await makeSharedMeeting();
+
+    try {
+      const form = formWith('agenda.txt', 'three items');
+      form.append('meetingId', meetingId);
+
+      const response = await client.upload('/api/files', form);
+      assert.equal(response.status, 201);
+
+      const { file } = await readJson<{ file: FileDto }>(response);
+      // The scope travels on the DTO, which is what lets the in-call file panel tell
+      // its own files from the channel's.
+      assert.equal(file.meetingId, meetingId);
+
+      // Readable through the ordinary download route -- one upload path, not two.
+      const download = await client.get(`/api/files/${file.id}/download`);
+      assert.equal(download.status, 200);
+      assert.equal(await download.text(), 'three items');
+    } finally {
+      await prisma.meeting.delete({ where: { id: meetingId } });
+    }
+  });
+
+  it('lists the files shared into one call', async () => {
+    const meetingId = await makeSharedMeeting();
+
+    try {
+      const form = formWith('notes.txt', 'in the room');
+      form.append('meetingId', meetingId);
+      const uploaded = await readJson<{ file: FileDto }>(await client.upload('/api/files', form));
+
+      const listed = await client.getJson<{ files: FileDto[] }>(
+        `/api/files?meetingId=${meetingId}`,
+      );
+      assert.deepEqual(
+        listed.files.map((f) => f.id),
+        [uploaded.file.id],
+      );
+    } finally {
+      await prisma.meeting.delete({ where: { id: meetingId } });
+    }
+  });
+
+  it('will not share into a call the caller is not a participant in', async () => {
+    const meeting = await prisma.meeting.create({
+      data: {
+        title: 'Not Yours',
+        roomName: `fs-theirs-${Math.random().toString(36).slice(2, 10)}`,
+        organizerId: 'u2',
+        startsAt: new Date(),
+        endsAt: new Date(Date.now() + 3_600_000),
+        participants: { create: [{ userId: 'u2' }] },
+      },
+      select: { id: true },
+    });
+
+    try {
+      const form = formWith('sneaky.txt', 'should not land');
+      form.append('meetingId', meeting.id);
+
+      const response = await client.upload('/api/files', form);
+      // Existence is not the test -- participation is. Without this a caller could
+      // name any meeting id and share a file into someone else's call.
+      assert.equal(response.status, 400);
+      const body = await readJson<{ error: { code: string } }>(response);
+      assert.equal(body.error.code, 'bad_meeting');
+    } finally {
+      await prisma.meeting.delete({ where: { id: meeting.id } });
+    }
+  });
+
+  it('will not list the files of a call the caller is not in', async () => {
+    const meeting = await prisma.meeting.create({
+      data: {
+        title: 'Private Call',
+        roomName: `fs-private-${Math.random().toString(36).slice(2, 10)}`,
+        organizerId: 'u2',
+        startsAt: new Date(),
+        endsAt: new Date(Date.now() + 3_600_000),
+        participants: { create: [{ userId: 'u2' }] },
+      },
+      select: { id: true },
+    });
+
+    try {
+      // Scoped in the query by participation, so this returns an empty list rather
+      // than the files -- and rather than confirming that any exist.
+      const listed = await client.getJson<{ files: FileDto[] }>(
+        `/api/files?meetingId=${meeting.id}`,
+      );
+      assert.deepEqual(listed.files, []);
+    } finally {
+      await prisma.meeting.delete({ where: { id: meeting.id } });
+    }
+  });
+
+  it('does not put a call file in the channel listing', async () => {
+    const meetingId = await makeSharedMeeting();
+
+    try {
+      const form = formWith('room-only.txt', 'not in c1');
+      form.append('meetingId', meetingId);
+      const uploaded = await readJson<{ file: FileDto }>(await client.upload('/api/files', form));
+
+      const inChannel = await client.getJson<{ files: FileDto[] }>('/api/files?channelId=c1');
+      assert.equal(
+        inChannel.files.some((f) => f.id === uploaded.file.id),
+        false,
+        'a file shared into a call is not a channel file',
+      );
+    } finally {
+      await prisma.meeting.delete({ where: { id: meetingId } });
+    }
   });
 });

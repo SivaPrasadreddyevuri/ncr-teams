@@ -37,7 +37,14 @@ export type RealtimeEvent =
   | { type: 'meeting.message.created'; meetingId: string; message: unknown }
   | { type: 'meeting.message.updated'; meetingId: string; message: unknown }
   | { type: 'meeting.message.deleted'; meetingId: string; messageId: string }
-  | { type: 'file.created'; channelId: string | null; file: unknown };
+  /**
+   * A file reaching a conversation.
+   *
+   * Both scopes are carried rather than one being implied: an upload can land in a
+   * channel, in a meeting, or in neither yet, and the relay has to know which set of
+   * sockets the file belongs in.
+   */
+  | { type: 'file.created'; channelId: string | null; meetingId: string | null; file: unknown };
 
 type Listener = (event: RealtimeEvent) => void;
 
