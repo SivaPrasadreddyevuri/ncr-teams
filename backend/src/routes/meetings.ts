@@ -5,6 +5,7 @@
  *
  * - `GET  /`             the caller's meetings, upcoming or past
  * - `POST /`             open or rejoin a channel's standing call room
+ * - `GET  /channel/:id`  whether a channel has a call open right now
  * - `GET  /:id`          one meeting, with its participants and recent messages
  * - `GET  /:id/messages` the transcript, paginated
  * - `POST /:id/messages` post to the transcript
@@ -321,6 +322,45 @@ export function meetingsRouter() {
     });
 
     sendJson(res, 201, { meeting: toMeetingDto(created), created: true });
+  });
+
+  /**
+   * Whether a channel currently has a call, for the chat sidebar's Meetings tab.
+   *
+   * Separate from `GET /` because that list is participant-scoped, and this is the
+   * case it cannot answer. A colleague's call is invisible there until they have
+   * joined it -- which means a second person opening the Meetings tab of a channel
+   * where a call is already running is told no call is open, and has no way to get
+   * into one that is. The person on the call can see it; the people who want to join
+   * cannot. That is the whole failure this route exists to remove.
+   *
+   * Gated on **channel** membership rather than participation, deliberately. A
+   * `Meeting` row is private to its participants, but a channel's call is not a
+   * secret from the channel: anyone who can read the conversation can be told there
+   * is a call in it. `roomName` is derived from the channel id, so this answers
+   * "is the room for this channel open" without trusting anything from the caller.
+   *
+   * 404 rather than an empty object, so the tab can distinguish "no call" from a
+   * failed read -- the same reasoning as every other read in this router.
+   */
+  router.get('/channel/:channelId', requireAuth, async (req, res) => {
+    const { channelId } = z.object({ channelId: z.string().min(1).max(64) }).parse(req.params);
+
+    const channel = await prisma.channel.findFirst({
+      where: { id: channelId, team: { members: { some: { userId: req.user!.id } } } },
+      select: { id: true },
+    });
+
+    if (!channel) throw notFound('No such channel.');
+
+    const row = await prisma.meeting.findFirst({
+      where: { roomName: `channel-${channelId}`, endsAt: { gt: new Date() } },
+      include: participantInclude,
+    });
+
+    if (!row) throw notFound('No call is open in this channel.');
+
+    sendJson(res, 200, { meeting: toMeetingDto(row) });
   });
 
   /**

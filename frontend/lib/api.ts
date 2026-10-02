@@ -661,6 +661,21 @@ export const api = {
     }),
 
   /**
+   * Whether a channel has a call open right now.
+   *
+   * Needed because the caller's own meeting list is participant-scoped: someone who
+   * has not joined yet is not in it, so the Meetings tab would report no call while
+   * one is plainly running. Gated on channel membership server-side -- a channel's
+   * call is visible to the channel, not just to the people already in it.
+   *
+   * 404 when there is no call, which is a real answer rather than a failure.
+   */
+  channelCall: (channelId: string, signal?: AbortSignal) =>
+    request<{ meeting: MeetingDto }>(`/meetings/channel/${encodeURIComponent(channelId)}`, {
+      signal,
+    }),
+
+  /**
    * The in-call transcript, paginated.
    *
    * Separate from the channel thread on purpose: meeting chat is a different

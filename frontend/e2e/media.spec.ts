@@ -36,9 +36,22 @@ const SARAH = { email: 'sarah@company.com', password: 'showcase-2026' };
  * `setup-env` loads the developer's own `backend/.env` and the browser cannot see it.
  * A 503 here is the honest answer -- the deployment has no LiveKit credentials -- and
  * is what turns into a skip with a message naming what is missing.
+ *
+ * **The CSRF header is not optional.** Every state-changing request in this app needs
+ * `x-csrf-token` alongside the session cookie, so a bare POST to the token endpoint
+ * answers 403 whatever the credentials are. Asking without it made this function
+ * return false on a fully configured deployment, which meant all three tests below
+ * skipped with a message blaming missing credentials -- the one thing they were not
+ * missing. The cookie is read from the context the UI sign-in already populated.
  */
 async function liveMediaAvailable(page: Page): Promise<boolean> {
   if (!livekitUrl) return false;
+
+  const csrf = (await page.context().cookies())
+    .find((cookie) => cookie.name === 'ncr_csrf')?.value;
+  if (!csrf) return false;
+
+  const headers = { 'x-csrf-token': csrf };
 
   const list = await page
     .request
@@ -51,7 +64,7 @@ async function liveMediaAvailable(page: Page): Promise<boolean> {
 
   const token = await page
     .request
-    .post(`/api/meetings/${meeting.id}/token`)
+    .post(`/api/meetings/${meeting.id}/token`, { headers })
     .then((r) => (r.ok() ? r.json() : null))
     .catch(() => null);
 
@@ -130,6 +143,21 @@ test.describe('meeting room: live media', () => {
   });
 
   test('two people in one room both see a remote video track attached', async ({ browser }) => {
+    /**
+     * Three minutes, against the default 45 seconds.
+     *
+     * This is the only test here that signs in twice and joins two rooms, and against
+     * a real deployment it also waits on real media negotiation -- a WebRTC
+     * offer/answer across two browser contexts and a remote LiveKit server. The default
+     * expired mid-scenario, which reported as a bare timeout naming no step at all.
+     *
+     * Set rather than passed as an argument because the argument form is not available
+     * in every Playwright version this suite runs against. The individual assertions
+     * keep their own 45 second budgets, so one that is genuinely stuck still fails on
+     * its own rather than at the end of the run.
+     */
+    test.setTimeout(180_000);
+
     const alexContext = await browser.newContext({ permissions: ['camera', 'microphone'] });
     const sarahContext = await browser.newContext({ permissions: ['camera', 'microphone'] });
     const alex = await alexContext.newPage();
@@ -146,27 +174,46 @@ test.describe('meeting room: live media', () => {
       }
 
       await signIn(sarah, SARAH);
-      await joinFirstMeeting(alex);
-      await joinFirstMeeting(sarah);
 
-      // Both sockets settled before joining matters: a track published before the
-      // other side subscribes still arrives, but the participant list only fills in
-      // after the remote event, so waiting on status avoids racing the first tile.
+      /**
+       * Both people join through the channel, deliberately.
+       *
+       * Joining "the first meeting" per user does not work here, and quietly did not
+       * before: `GET /api/meetings` is participant-scoped, so two people see two
+       * different lists and land in two different rooms. The test then waited for a
+       * tile that could never appear, for a reason that had nothing to do with media.
+       *
+       * A channel has one derived room, so pressing the call button in the same
+       * channel is the only way to be sure both are in the same LiveKit room -- and it
+       * is the flow a person actually uses.
+       */
+      await alex.goto('/chat');
+      await expect(alex.getByRole('button', { name: /^Start video call in #/ })).toBeVisible({
+        timeout: 30_000,
+      });
+
+      const label = await alex
+        .getByRole('button', { name: /^Start video call in #/ })
+        .getAttribute('aria-label');
+      const channel = label!.replace('Start video call in #', '');
+
+      await alex.getByRole('button', { name: `Start video call in #${channel}` }).click();
       await expect(alex.getByTestId('room-status')).toHaveAttribute('data-state', 'live', {
-        timeout: 45_000,
-      });
-      await expect(sarah.getByTestId('room-status')).toHaveAttribute('data-state', 'live', {
-        timeout: 45_000,
+        timeout: 60_000,
       });
 
-      // Each side sees a tile for the other's identity -- proof the room is shared
-      // rather than two separate copies of the meeting page.
-      await expect(
-        alex.getByTestId('meeting-tile').filter({ hasText: 'Sarah' }),
-      ).toBeVisible({ timeout: 45_000 });
-      await expect(
-        sarah.getByTestId('meeting-tile').filter({ hasText: 'Alex' }),
-      ).toBeVisible({ timeout: 45_000 });
+      await sarah.goto('/chat');
+      await sarah.getByTestId('channel-button').filter({ hasText: channel }).first().click();
+      await sarah.getByRole('button', { name: /^Meetings$/ }).click();
+      await sarah.getByRole('button', { name: `Join the call in #${channel}` }).click();
+
+      // Both sockets settled before asserting matters: a track published before the
+      // other side subscribes still arrives, but the remote participant only appears
+      // after its own event.
+      await expect(sarah.getByTestId('room-status')).toHaveAttribute('data-state', 'live', {
+        timeout: 60_000,
+      });
+
       await assertReceivingFrames(alex, 'Sarah');
       await assertReceivingFrames(sarah, 'Alex');
     } finally {

@@ -615,118 +615,87 @@ after(async () => {
   });
 });
 
-describe('meetings: a channel has one standing call room', () => {
-  it('requires a session', async () => {
-    assert.equal((await harness.client().post('/api/meetings', { channelId: 'c1' })).status, 401);
-  });
-
-  it('opens a call for a channel the caller is a member of', async () => {
-    const channelId = await makeChannel(['u1']);
-
-    const response = await employee.post('/api/meetings', { channelId });
-    assert.equal(response.status, 201);
-
-    const body = await readJson<{ meeting: MeetingRow; created: boolean }>(response);
-    assert.equal(body.created, true);
-    // Derived, not chosen: the room is named after the channel so the button is
-    // idempotent and a colleague lands in the same room without being invited.
-    assert.equal(body.meeting.roomName, `channel-${channelId}`);
-    assert.equal(body.meeting.ended, false);
-    // The starter is a participant, not just the organiser, or the room they just
-    // opened would not be readable by the scoping filter.
-    assert.ok(
-      body.meeting.participants.some((p) => p.id === 'u1'),
-      'the caller is in the participant list',
-    );
-  });
-
-  it('is idempotent: clicking the button twice is one room, not two', async () => {
-    const channelId = await makeChannel(['u1']);
-
-    const first = await readJson<{ meeting: MeetingRow; created: boolean }>(
+describe('meetings: a channel’s call is visible to the channel', () => {
+  /**
+   * Opens a call in a throwaway channel owned by `memberIds`, and returns both ids.
+   *
+   * The membership list is the point of most of these: the route is gated on channel
+   * membership, so a colleague who cannot read the channel also cannot be told there
+   * is a call in it.
+   */
+  async function openCall(memberIds: string[]): Promise<{ channelId: string; meetingId: string }> {
+    const channelId = await makeChannel(memberIds);
+    const body = await readJson<{ meeting: MeetingRow; created: boolean }>(
       await employee.post('/api/meetings', { channelId }),
     );
-    const second = await readJson<{ meeting: MeetingRow; created: boolean }>(
-      await employee.post('/api/meetings', { channelId }),
+    return { channelId, meetingId: body.meeting.id };
+  }
+
+  it('tells a colleague in the channel there is a call, without them having joined it', async () => {
+    const { channelId, meetingId } = await openCall(['u1', 'u2']);
+
+    // The gap this route exists for. `GET /api/meetings` is participant-scoped, so the
+    // colleague's own list does not mention the room -- which is why reading the tab
+    // off that list could never tell them a call was running.
+    const listed = await outsider.getJson<{ meetings: MeetingRow[] }>('/api/meetings?scope=upcoming');
+    assert.equal(
+      listed.meetings.some((m) => m.id === meetingId),
+      false,
+      'the colleague has not joined, so the meeting list does not include it',
     );
 
-    assert.equal(second.created, false);
-    assert.equal(second.meeting.id, first.meeting.id);
-    assert.equal(second.meeting.participantCount, first.meeting.participantCount);
-  });
-
-  it('puts a second person in the same room rather than opening another', async () => {
-    const channelId = await makeChannel(['u1', 'u2']);
-
-    const first = await readJson<{ meeting: MeetingRow }>(
-      await employee.post('/api/meetings', { channelId }),
+    const body = await outsider.getJson<{ meeting: MeetingRow }>(
+      `/api/meetings/channel/${channelId}`,
     );
-    const second = await readJson<{ meeting: MeetingRow }>(
-      await outsider.post('/api/meetings', { channelId }),
-    );
-
-    assert.equal(second.meeting.id, first.meeting.id);
-    assert.equal(second.meeting.participantCount, 2);
-    assert.equal(second.meeting.organizerId, 'u1');
+    assert.equal(body.meeting.id, meetingId);
   });
 
-  it('will not open a call in a channel the caller is not a member of', async () => {
-    const channelId = await makeChannel(['u2']);
+  it('withholds it from someone who cannot read the channel', async () => {
+    const { channelId } = await openCall(['u1']);
 
-    assert.equal((await employee.post('/api/meetings', { channelId })).status, 404);
+    // Channel membership, not participation. Both are true here in reverse: u1 opened
+    // the call and is a participant, u2 is neither a member nor a participant.
+    assert.equal((await employee.get(`/api/meetings/channel/${channelId}`)).status, 200);
+    assert.equal((await outsider.get(`/api/meetings/channel/${channelId}`)).status, 404);
   });
 
-  it('will not open a call for a channel that does not exist', async () => {
-    assert.equal((await employee.post('/api/meetings', { channelId: 'no-such-channel' })).status, 404);
-  });
+  it('reports no call rather than an error once the window has closed', async () => {
+    const { channelId, meetingId } = await openCall(['u1']);
 
-  it('rejects an unexpected body field rather than ignoring it', async () => {
-    const channelId = await makeChannel(['u1']);
-
-    const response = await employee.post('/api/meetings', { channelId, roomName: 'chosen-by-caller' });
-    assert.equal(response.status, 400);
-  });
-
-  it('reopens an expired room in place, keeping the transcript and the unique room name', async () => {
-    const channelId = await makeChannel(['u1', 'u2']);
-    const roomName = `channel-${channelId}`;
-    const past = new Date(Date.now() - 3_600_000);
-
-    const stale = await prisma.meeting.create({
-      data: {
-        title: 'Earlier call',
-        roomName,
-        organizerId: 'u1',
-        startsAt: new Date(past.getTime() - 3_600_000),
-        endsAt: past,
-        participants: { create: [{ userId: 'u1' }, { userId: 'u2' }] },
-      },
+    await prisma.meeting.update({
+      where: { id: meetingId },
+      data: { endsAt: new Date(Date.now() - 60_000) },
     });
 
-    const response = await outsider.post('/api/meetings', { channelId });
-    assert.equal(response.status, 200);
-
-    const body = await readJson<{ meeting: MeetingRow; created: boolean }>(response);
-    // Reused rather than inserted. A second row is impossible -- `roomName` is unique
-    // -- so this is the only way back, and it is what keeps the transcript attached.
-    assert.equal(body.created, false);
-    assert.equal(body.meeting.id, stale.id);
-    assert.equal(body.meeting.ended, false);
-    // The person who reopened it runs the call now.
-    assert.equal(body.meeting.organizerId, 'u2');
+    // 404, so the tab can tell "no call" from a failed read. A room that has lapsed
+    // must stop inviting people into it.
+    assert.equal((await employee.get(`/api/meetings/channel/${channelId}`)).status, 404);
   });
 
-  it('does not extend the window when the room is still open', async () => {
+  it('reports no call for a channel that has never had one', async () => {
     const channelId = await makeChannel(['u1']);
 
-    const first = await readJson<{ meeting: MeetingRow }>(
-      await employee.post('/api/meetings', { channelId }),
-    );
-    const second = await readJson<{ meeting: MeetingRow }>(
-      await employee.post('/api/meetings', { channelId }),
-    );
+    assert.equal((await employee.get(`/api/meetings/channel/${channelId}`)).status, 404);
+  });
 
-    // Otherwise repeated clicks would keep a dead room listed as upcoming forever.
-    assert.equal(second.meeting.endsAt, first.meeting.endsAt);
+  it('returns 404 for a channel that does not exist', async () => {
+    assert.equal((await employee.get('/api/meetings/channel/no-such-channel')).status, 404);
+  });
+
+  it('requires a session', async () => {
+    assert.equal((await harness.client().get('/api/meetings/channel/c1')).status, 401);
+  });
+
+  it('is not shadowed by the meeting detail route', async () => {
+    // `/channel/:channelId` and `/:id` have the same shape, so a literal segment is
+    // only reachable if it is registered first. When it was not, every request here
+    // answered 404 for a meeting called "channel".
+    const channelId = await makeChannel(['u1']);
+
+    const response = await employee.get(`/api/meetings/channel/${channelId}`);
+    assert.equal(response.status, 404);
+
+    const body = await readJson<{ error: { code: string } }>(response);
+    assert.equal(body.error.code, 'not_found');
   });
 });

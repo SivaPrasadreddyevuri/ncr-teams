@@ -218,12 +218,13 @@ export function ChatClient({
   }, [active?.id]);
 
   /**
-   * Whether this channel already has a call, for the Meetings tab.
+   * Whether this channel has a call open, for the Meetings tab.
    *
-   * Found by looking for the channel's derived room name in the caller's upcoming
-   * meetings, rather than by asking the server to create one. Rendering a tab should
-   * not have the side effect of opening a room -- reading the list is idempotent,
-   * posting to `/api/meetings` is not.
+   * Asked through `/api/meetings/channel/:id` rather than read off the caller's own
+   * meeting list, because that list is participant-scoped: someone who has not joined
+   * yet is not in it, so the tab would say no call is open while one is plainly
+   * running and offer no way in. Reading the tab must also not create anything, which
+   * is why this is a GET and not the `POST /api/meetings` that opens a room.
    *
    * Re-read when `call` changes, so starting a call from the header immediately
    * shows up here rather than needing a reload.
@@ -238,22 +239,49 @@ export function ChatClient({
     }
 
     let cancelled = false;
-    const roomName = `channel-${channelId}`;
+    const controller = new AbortController();
 
     void api
-      .meetings({ scope: 'upcoming', limit: 50 })
+      .channelCall(channelId, controller.signal)
       .then((response) => {
-        if (cancelled) return;
-        setChannelCall(response.meetings.find((m) => m.roomName === roomName) ?? null);
+        if (!cancelled) setChannelCall(response.meeting);
       })
       .catch(() => {
+        // A 404 here is the ordinary "no call in this channel", not a failure.
         if (!cancelled) setChannelCall(null);
       });
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [active?.id, call]);
+
+  /**
+   * Joins a call that is already running.
+   *
+   * Still goes through `POST /api/meetings`, because that is what makes the caller a
+   * participant -- and participation is what every meeting-scoped read and the
+   * WebSocket subscription are checked against. Reading the room is not enough to be
+   * in it; a caller who could see a call but never join it would be the same gap this
+   * flow just had, one click later. The call is idempotent, so joining an existing
+   * room returns it unchanged.
+   */
+  const joinCall = useCallback(async () => {
+    const channelId = active?.id;
+    if (!channelId || startingCall) return;
+
+    setStartingCall(true);
+    setCallError(null);
+    try {
+      const response = await api.startChannelCall(channelId);
+      setCall(toRoomMeeting(response.meeting, []));
+    } catch (cause) {
+      setCallError(cause instanceof ApiError ? cause.message : 'That call could not be joined.');
+    } finally {
+      setStartingCall(false);
+    }
+  }, [active?.id, startingCall]);
 
   useEffect(() => {
     if (!active) return;
@@ -1060,7 +1088,8 @@ const name =
                 <button
                   type="button"
                   className="join"
-                  onClick={() => setCall(toRoomMeeting(channelCall, []))}
+                  onClick={() => void joinCall()}
+                  disabled={startingCall}
                   aria-label={`Join the call in #${active?.name}`}
                 >
                   <Video size={14} /> Join call
