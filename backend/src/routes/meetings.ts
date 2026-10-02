@@ -1,10 +1,11 @@
 /**
  * Meetings.
  *
- * Two listings and one detail, scoped to meetings the caller is in:
+ * Two listings, one detail, and the write that creates a call:
  *
- * - `GET /`              the caller's meetings, upcoming or past
- * - `GET /:id`           one meeting, with its participants and recent messages
+ * - `GET  /`             the caller's meetings, upcoming or past
+ * - `POST /`             open or rejoin a channel's standing call room
+ * - `GET  /:id`          one meeting, with its participants and recent messages
  *
  * ## Scoping is a participant check, not a flag
  *
@@ -42,6 +43,25 @@
  * The endpoint answers 503 when LiveKit is not configured, rather than pretending to
  * work. The frontend turns that into a labelled simulated room instead of a silent
  * failure at the point of joining.
+ *
+ * ## A channel has one standing call room
+ *
+ * `POST /` takes a `channelId` rather than a time, because the call button in a
+ * channel header has no start time to send. The `roomName` is therefore derived, not
+ * chosen: `channel-<channelId>`. That is stable per channel, which is what makes the
+ * button idempotent -- clicking it twice rejoins one room rather than creating two
+ * rooms nobody can find, and a colleague who clicks it an hour later lands in the
+ * same place.
+ *
+ * It also means there is exactly one `Meeting` row per channel, reused rather than
+ * appended, because `Meeting.roomName` is unique and a second row could not be
+ * inserted anyway. Reopening refreshes the window and promotes the starter to
+ * organiser. The transcript stays attached across reopens, which is the intended
+ * behaviour: it is the channel's call history, not a per-call scratchpad.
+ *
+ * The window is what makes the room expire. `endsAt` drives both `?scope=upcoming` and
+ * the derived `ended` flag, so without it a standing room would be "upcoming"
+ * forever and the meetings list would be permanently one row longer.
  */
 
 import { Router } from 'express';
@@ -68,6 +88,28 @@ const listQuery = z
     limit: z.coerce.number().int().min(1).max(100).default(50),
   })
   .strict();
+
+/**
+ * `POST /` takes a channel, not a time.
+ *
+ * `title` is optional because the button that calls this sends only a `channelId`;
+ * it exists for a caller that wants to name the call it is opening.
+ */
+const createBody = z
+  .object({
+    channelId: z.string().min(1).max(64),
+    title: z.string().trim().min(1).max(120).optional(),
+  })
+  .strict();
+
+/**
+ * How long a standing call room stays joinable after it is opened.
+ *
+ * Long, because nobody closes an ad-hoc call and an abandoned row would otherwise
+ * keep the channel's call alive forever. Short enough that the meetings list does not
+ * accumulate a permanent row per channel.
+ */
+const ADHOC_WINDOW_MS = 4 * 60 * 60 * 1000;
 
 /**
  * Participant columns.
@@ -137,6 +179,87 @@ export function meetingsRouter() {
       // meetings" from "no meetings before this".
       evaluatedAt: now.toISOString(),
     });
+  });
+
+  /**
+   * Open, or rejoin, a channel's call.
+   *
+   * Idempotent on `channelId`. Two people clicking the call button at the same moment
+   * converge on one room and one participant list rather than racing to insert two.
+   */
+  router.post('/', requireAuth, async (req, res) => {
+    const body = createBody.parse(req.body ?? {});
+    const userId = req.user!.id;
+    const now = new Date();
+
+    // Channel membership is team membership -- `Channel` stores no member column, so
+    // the team roster is the authority. Scoped in the query so a channel you are not
+    // on is a 404 rather than a call you could open into.
+    const channel = await prisma.channel.findFirst({
+      where: { id: body.channelId, team: { members: { some: { userId } } } },
+      select: { id: true, name: true, team: { select: { name: true } } },
+    });
+
+    if (!channel) throw notFound('No such channel.');
+
+    const roomName = `channel-${channel.id}`;
+
+    const existing = await prisma.meeting.findUnique({
+      where: { roomName },
+      include: participantInclude,
+    });
+
+    if (existing) {
+      const alreadyIn = existing.participants.some((p) => p.user.id === userId);
+      const ended = existing.endsAt.getTime() <= now.getTime();
+
+      /**
+       * Reopened rather than created. A second row is impossible anyway -- `roomName`
+       * is unique -- so this is the only way to bring the room back after its window
+       * closes, and doing it as an update is what keeps the transcript.
+       */
+      const refreshed = await prisma.meeting.update({
+        where: { id: existing.id },
+        data: {
+          // Only rewrite the window when it actually closed. Otherwise the join would
+          // push the expiry out on every call-button click, and a room people keep
+          // re-entering would stay listed as upcoming indefinitely.
+          ...(ended
+            ? {
+                startsAt: now,
+                endsAt: new Date(now.getTime() + ADHOC_WINDOW_MS),
+                // The person who reopened it is now running the call. Leaving the
+                // previous organiser in place would leave `isOrganizer` pointing at
+                // someone who is not here.
+                organizerId: userId,
+              }
+            : {}),
+          ...(body.title ? { title: body.title } : {}),
+          participants: alreadyIn ? undefined : { create: { userId } },
+        },
+        include: participantInclude,
+      });
+
+      sendJson(res, 200, { meeting: toMeetingDto(refreshed), created: false });
+      return;
+    }
+
+    const created = await prisma.meeting.create({
+      data: {
+        title: body.title ?? `${channel.team.name} / #${channel.name}`,
+        roomName,
+        organizerId: userId,
+        startsAt: now,
+        endsAt: new Date(now.getTime() + ADHOC_WINDOW_MS),
+        // The starter is a participant, not merely the organiser: the participant row
+        // is what every scoped read in this router filters on, so omitting it would
+        // make the room they just opened unreadable to them.
+        participants: { create: { userId } },
+      },
+      include: participantInclude,
+    });
+
+    sendJson(res, 201, { meeting: toMeetingDto(created), created: true });
   });
 
   /**
