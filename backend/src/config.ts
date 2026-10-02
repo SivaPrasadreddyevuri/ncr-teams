@@ -51,6 +51,20 @@ const schema = z
     SESSION_TTL_SECONDS: z.coerce.number().int().min(300).default(7 * 24 * 60 * 60),
 
     /**
+     * LiveKit API credentials, for minting meeting join tokens.
+     *
+     * Optional on purpose. This service only ever signs a token -- it never talks to
+     * LiveKit's admin API, so it needs the key and secret but not the project URL.
+     * Leaving them unset must not stop the service booting, because a demo run
+     * without LiveKit configured should still show the meeting list and a working
+     * (if simulated) room rather than a 500 from every route that imports this.
+     *
+     * `livekitConfigured()` is the single place that decides whether video is real.
+     */
+    LIVEKIT_API_KEY: z.string().trim().min(1).optional(),
+    LIVEKIT_API_SECRET: z.string().trim().min(1).optional(),
+
+    /**
      * Extra browser origins allowed to send credentialed requests.
      *
      * Unnecessary in production: the frontend proxies `/api/*` to this service
@@ -130,3 +144,15 @@ export const corsOrigins = config.CORS_ORIGINS.split(',')
 export const sessionCookieName = 'ncr_session';
 export const csrfCookieName = 'ncr_csrf';
 export const csrfHeaderName = 'x-csrf-token';
+
+/**
+ * Whether meeting video can actually connect.
+ *
+ * Both halves are required: a key without a secret would sign nothing, and a secret
+ * without a key cannot be used. Anything that turns video on should ask this first,
+ * so an unconfigured deployment degrades to a labelled simulated room rather than
+ * failing at the point of joining.
+ */
+export const livekitConfigured = Boolean(
+  config.LIVEKIT_API_KEY && config.LIVEKIT_API_SECRET,
+);

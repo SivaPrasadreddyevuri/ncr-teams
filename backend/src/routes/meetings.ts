@@ -29,16 +29,29 @@
  * exclusive in practice. Meeting chat is exposed here through the meeting detail
  * rather than through `/messages`, because that endpoint requires a `channelId` on
  * purpose -- widening it to accept a meeting id would make every channel-scoped
- * permission question ambiguous. In-call chat stays out of scope until LiveKit
- * supplies the token flow; this returns the stored transcript either way.
+ * permission question ambiguous. In-call chat uses the stored transcript rather than
+ * LiveKit data channels, so it survives a room with no media connected.
+ *
+ * ## Join tokens
+ *
+ * `POST /:id/token` mints a LiveKit join token, scoped to the caller's own
+ * participation. It is a POST rather than a GET -- unlike `/auth/ws-token` -- because
+ * this token can join a room, and a credential that belongs in a request body should
+ * not also belong in an access log.
+ *
+ * The endpoint answers 503 when LiveKit is not configured, rather than pretending to
+ * work. The frontend turns that into a labelled simulated room instead of a silent
+ * failure at the point of joining.
  */
 
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../db.js';
-import { notFound } from '../http/errors.js';
+import { notFound, HttpError } from '../http/errors.js';
 import { sendJson } from '../serialise.js';
 import { requireAuth } from '../middleware/session.js';
+import { livekitConfigured } from '../config.js';
+import { issueMeetingToken } from '../livekit/token.js';
 import { toMeetingDto } from '../dto.js';
 
 /** How far back `scope=past` looks before it is not worth listing. */
@@ -175,6 +188,54 @@ export function meetingsRouter() {
       meeting: toMeetingDto(row),
       messages,
       messagesTruncated: row.messages.length === 50,
+    });
+  });
+
+  /**
+   * Mint a LiveKit join token for one meeting.
+   *
+   * The same participant-scoped lookup as the detail route, so a meeting you are not
+   * in is a 404 rather than a token for someone else's room. A 404 rather than a 403
+   * because confirming the room exists is itself information.
+   */
+  router.post('/:id/token', requireAuth, async (req, res) => {
+    const { id } = z.object({ id: z.string().min(1).max(64) }).parse(req.params);
+
+    const row = await prisma.meeting.findFirst({
+      where: { id, participants: { some: { userId: req.user!.id } } },
+      select: { roomName: true },
+    });
+
+    if (!row) throw notFound('No such meeting.');
+
+    // Checked after the lookup, deliberately. "You are not in this meeting" is true
+    // whether or not LiveKit is configured, so it should not depend on it -- and
+    // answering 503 first would mean an unconfigured deployment returned the same
+    // refusal for a meeting you were in and one you were not.
+    if (!livekitConfigured) {
+      throw new HttpError(
+        503,
+        'livekit_not_configured',
+        'Video is not configured on this deployment. The room works, without media.',
+      );
+    }
+
+    // Identity and name both from the session, never from the frontend's persona
+    // picker. Two browsers claiming one identity would have LiveKit evict the first
+    // connection when the second joins.
+    const minted = await issueMeetingToken({
+      roomName: row.roomName,
+      userId: req.user!.id,
+      displayName: req.user!.name,
+    });
+
+    sendJson(res, 200, {
+      ...minted,
+      roomName: row.roomName,
+      // Deliberately no project URL. This service signs tokens and never contacts
+      // LiveKit, so it has no URL to give; the browser already has one baked in via
+      // NEXT_PUBLIC_LIVEKIT_URL at build time. Returning it from here would mean a
+      // server-side variable leaking into the client contract for no benefit.
     });
   });
 

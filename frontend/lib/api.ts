@@ -624,6 +624,24 @@ export const api = {
       messagesTruncated: boolean;
     }>(`/meetings/${encodeURIComponent(id)}`, { signal }),
 
+  /**
+   * Mints a short-lived LiveKit join token for one meeting.
+   *
+   * POST rather than GET, so a credential that can join a room never lands in a URL
+   * where a proxy or an access log would keep it. Five-minute TTL, scoped by the
+   * server to the caller's own participation -- calling this for a meeting you are not
+   * in is a 404.
+   *
+   * A `livekit_not_configured` error means the deployment has no credentials. That is
+   * a supported state rather than a failure: the caller falls back to a labelled
+   * simulated room.
+   */
+  meetingToken: (meetingId: string) =>
+    request<{ token: string; expiresAt: string; expiresInSeconds: number; roomName: string }>(
+      `/meetings/${encodeURIComponent(meetingId)}/token`,
+      { method: 'POST', body: {} },
+    ),
+
   /* events */
   /**
    * Calendar events in a window.

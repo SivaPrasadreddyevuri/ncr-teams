@@ -68,7 +68,18 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        // A synthetic camera and microphone, so a media test needs no hardware and no
+        // permission prompt. Without these, Chromium refuses `getUserMedia` outright in
+        // headless and the LiveKit path is untestable on any machine -- including CI.
+        launchOptions: {
+          args: [
+            '--use-fake-ui-for-media-stream',
+            '--use-fake-device-for-media-stream',
+          ],
+        },
+      },
     },
   ],
 

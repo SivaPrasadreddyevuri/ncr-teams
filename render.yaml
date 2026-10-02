@@ -129,6 +129,22 @@ services:
       - key: SESSION_PEPPER
         generateValue: true
 
+      # LiveKit credentials, for minting meeting join tokens.
+      #
+      # Two variables and deliberately no project URL: this service only ever signs a
+      # token, so it needs the key and secret but never contacts LiveKit. The browser
+      # gets the URL separately as NEXT_PUBLIC_LIVEKIT_URL, which Vercel inlines at
+      # build time.
+      #
+      # `sync: false` because they are committed nowhere. Leaving them unset is
+      # supported: /api/meetings/:id/token answers 503 and the room falls back to a
+      # labelled simulated one rather than failing to join.
+      - key: LIVEKIT_API_KEY
+        sync: false
+
+      - key: LIVEKIT_API_SECRET
+        sync: false
+
       # Render terminates TLS and forwards one hop. Without this, Express reads
       # the proxy's address as the client's, and the session cookie cannot be
       # Secure -- and config.ts refuses to boot in production without it.

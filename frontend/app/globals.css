@@ -1791,6 +1791,33 @@ button {
   position: relative;
 }
 
+/*
+ * The room's own status line.
+ *
+ * Present rather than absent because the fallback -- a room with no media -- has to
+ * be visible. A simulated call that looked like a real one would let someone sit
+ * there believing they were on camera, which is the one thing this app should never
+ * do. Muted for the normal connected state so it does not compete with the call.
+ */
+.meeting-status {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 6px 14px;
+  font-size: 12px;
+  color: #7f8ca3;
+  background: #0c111c;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.meeting-status[data-state='simulated'],
+.meeting-status[data-state='failed'] {
+  color: #e3b341;
+}
+
+.meeting-status[data-state='live'] {
+  color: #7f8ca3;
+}
+
 .meeting-room {
   height: calc(100vh - 144px);
   background: #101522;

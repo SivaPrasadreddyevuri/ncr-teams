@@ -346,3 +346,71 @@ describe('meetings: bounds', () => {
     assert.equal((await employee.get('/api/meetings?showAll=true')).status, 400);
   });
 });
+
+describe('meetings: the join token', () => {
+  it('requires a session', async () => {
+    const id = await makeMeeting({ participantIds: ['u1'] });
+    assert.equal((await harness.client().post(`/api/meetings/${id}/token`)).status, 401);
+  });
+
+  /**
+   * The unconfigured path.
+   *
+   * Whether this is 503 or 200 depends on the developer's own `backend/.env`, because
+   * `setup-env` loads it. So the test asserts the *contract* -- never a token without
+   * credentials, and always a labelled refusal -- rather than pinning one status. A
+   * developer with LiveKit configured should not see this suite go red.
+   */
+  it('either mints a token or refuses with a clear code, never a half-token', async () => {
+    const id = await makeMeeting({ participantIds: ['u1'] });
+    const response = await employee.post(`/api/meetings/${id}/token`);
+
+    if (response.status === 503) {
+      const body = await readJson<{ error: { code: string } }>(response);
+      // The frontend keys its simulated-room label off this code, so it has to be
+      // stable rather than a generic failure.
+      assert.equal(body.error.code, 'livekit_not_configured');
+      return;
+    }
+
+    assert.equal(response.status, 200, 'a configured deployment should mint a token');
+
+    const body = await readJson<{
+      token: string;
+      expiresInSeconds: number;
+      roomName: string;
+    }>(response);
+
+    assert.equal(body.token.split('.').length, 3, 'a JWT, not an empty or truncated string');
+    assert.ok(body.expiresInSeconds > 0 && body.expiresInSeconds <= 600, 'short-lived');
+  });
+
+  it('will not mint a token for a meeting the caller is not in', async () => {
+    const id = await makeMeeting({ participantIds: ['u3', 'u4'], organizerId: 'u3' });
+
+    // 404, not 403: the token endpoint's existence already implies the room exists,
+    // and a 403 would confirm it to someone who is not a participant.
+    const response = await employee.post(`/api/meetings/${id}/token`);
+
+    assert.equal(response.status, 404);
+  });
+
+  it('will not mint a token for a meeting that does not exist', async () => {
+    assert.equal((await employee.post('/api/meetings/does-not-exist/token')).status, 404);
+  });
+
+  it('scopes the minted token to the meeting\'s own room, not the meeting id', async () => {
+    const id = await makeMeeting({ participantIds: ['u1'], title: 'Room Scope Check' });
+    const stored = await prisma.meeting.findUniqueOrThrow({ where: { id } });
+
+    const response = await employee.post(`/api/meetings/${id}/token`);
+    if (response.status === 503) return; // unconfigured; the claim tests cover the shape
+
+    const body = await readJson<{ roomName: string }>(response);
+    // The room is the meeting's `roomName`, which is unique and already returned by
+    // the detail route -- so two people opening the same meeting land in the same
+    // room by construction rather than by a mapping that could drift.
+    assert.equal(body.roomName, stored.roomName);
+    assert.notEqual(body.roomName, id);
+  });
+});

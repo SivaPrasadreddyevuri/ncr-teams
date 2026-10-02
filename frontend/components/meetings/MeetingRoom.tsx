@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Mic,
   MicOff,
@@ -16,7 +16,8 @@ import {
 import { PersonAvatar } from '@/components/profile/PersonAvatar';
 import { useDirectory } from '@/components/profile/ProfileProvider';
 import { relativeTime } from '@/lib/format';
-import type { Meeting, Person } from '@/lib/data';
+import { MeetingConnection, isVideoConfigured } from '@/lib/livekit';
+import type { Meeting } from '@/lib/data';
 
 type ChatLine = { id: string; authorId: string; body: string; createdAt: string };
 
@@ -35,17 +36,86 @@ export function MeetingRoom({
   // reaches the video tiles, the people panel and the chat log.
   const resolvedPeople = useDirectory();
 
+  /**
+   * The room's connection, owned by a class rather than by component state.
+   *
+   * `Room` has to be created once and torn down exactly once, and this component
+   * re-renders freely. The ref holds the connection; the effect creates it on mount
+   * and disposes it on unmount, which is what stops the camera staying on after
+   * someone navigates away from the call.
+   */
+  const connectionRef = useRef<MeetingConnection | null>(null);
+
+  const [status, setStatus] = useState<'connecting' | 'live' | 'simulated' | 'failed'>(
+    isVideoConfigured() ? 'connecting' : 'simulated',
+  );
+  const [mediaError, setMediaError] = useState<string | null>(null);
+  // Default off rather than on. These now reflect real published tracks, and
+  // starting with the camera shown as "on" while nothing is published is a lie.
   const [micOn, setMicOn] = useState(false);
-  const [cameraOn, setCameraOn] = useState(true);
+  const [cameraOn, setCameraOn] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [handRaised, setHandRaised] = useState(false);
   const [panel, setPanel] = useState<'people' | 'chat'>('people');
   const [lines, setLines] = useState<ChatLine[]>(meeting.messages);
   const [draft, setDraft] = useState('');
 
-  const participants = meeting.participantIds
-    .map((id) => resolvedPeople.find((p) => p.id === id))
-    .filter((p): p is Person => Boolean(p));
+  useEffect(() => {
+    if (!isVideoConfigured()) {
+      setStatus('simulated');
+      return;
+    }
+
+    const connection = new MeetingConnection(meeting.id, currentUserId);
+    connectionRef.current = connection;
+
+    const unsubscribe = connection.subscribe((snapshot) => {
+      setStatus(snapshot.status);
+      if (snapshot.error) setMediaError(snapshot.error);
+    });
+
+    void connection.connect();
+
+    return () => {
+      unsubscribe();
+      connectionRef.current = null;
+      // Disconnecting stops the camera and leaves the room. Skipping this is the bug
+      // that leaves the browser's recording light on after leaving a call.
+      void connection.dispose();
+    };
+  }, [meeting.id, currentUserId]);
+
+  /**
+   * Runs a media toggle and adopts the result.
+   *
+   * State is only updated after the call resolves, so a permission the user declines
+   * leaves the button showing "off" rather than optimistically claiming a microphone
+   * it never got.
+   */
+  const toggle = useCallback(async (run: () => Promise<boolean>, set: (value: boolean) => void) => {
+    setMediaError(null);
+    try {
+      set(await run());
+    } catch (cause) {
+      set(false);
+      setMediaError(cause instanceof Error ? cause.message : 'That device could not be changed.');
+    }
+  }, []);
+
+  const videoConfigured = isVideoConfigured();
+
+  /**
+   * Everybody the room should show: the meeting's participants, plus you.
+   *
+   * The meeting's own list is what someone who has not joined yet still appears
+   * under, so the grid does not collapse to a single tile while people are on their
+   * way into the call.
+   */
+  const participants = useMemo(() => {
+    const ids = new Set<string>(meeting.participantIds);
+    ids.add(currentUserId);
+    return [...ids];
+  }, [meeting.participantIds, currentUserId]);
 
 
   function send(event: React.FormEvent) {
@@ -63,13 +133,19 @@ export function MeetingRoom({
     <div className="meeting-wrap">
       <div className="meeting-room">
         <div className="video-grid">
-          {participants.map((person) => {
-            const isSelf = person.id === currentUserId;
+{participants.map((identity) => {
+            const isSelf = identity === currentUserId;
+            const person = resolvedPeople.find((p) => p.id === identity);
             return (
-              <div className="video" key={person.id}>
-                <PersonAvatar person={person} size="lg" online={person.online} />
+              <div
+                className="video"
+                key={identity}
+                data-testid="meeting-tile"
+                data-identity={identity}
+              >
+                <PersonAvatar person={person} size="lg" online={person?.online} />
                 <span className="person">
-                  {isSelf ? `${person.name} (You)` : person.name}
+                  {isSelf ? `${person?.name ?? 'You'} (You)` : (person?.name ?? identity)}
                   {handRaised && isSelf && <Hand size={12} style={{ marginLeft: 5 }} />}
                 </span>
               </div>
@@ -83,6 +159,24 @@ export function MeetingRoom({
             </div>
           )}
         </div>
+
+        {/*
+          The room says what it is. A silent fallback would let someone sit in a
+          simulated call believing they were on camera, which is the failure mode this
+          app has gone out of its way to avoid elsewhere.
+        */}
+        <p
+          className="meeting-status"
+          role="status"
+          data-testid="room-status"
+          data-state={status}
+        >
+          {status === 'live' && 'Live — your camera and microphone are connected.'}
+          {status === 'connecting' && 'Connecting to the call…'}
+          {status === 'simulated' &&
+            'Video is not configured on this deployment. The room works, without media.'}
+          {status === 'failed' && (mediaError ?? 'Could not join the call.')}
+        </p>
 
         <aside className="meeting-side">
           <h3>{meeting.title}</h3>
@@ -105,19 +199,24 @@ export function MeetingRoom({
             </button>
           </div>
 
-          {panel === 'people' ? (
-            participants.map((person) => (
-              <div className="dark-person" key={person.id}>
-                <PersonAvatar person={person} size="sm" online={person.online} />
-                <span>
-                  <strong style={{ display: 'block' }}>
-                    {person.name}
-                    {person.id === currentUserId && ' (You)'}
-                  </strong>
-                  {person.jobTitle ?? 'Team member'}
-                </span>
-              </div>
-            ))
+{panel === 'people' ? (
+            participants.map((identity) => {
+              // `participants` is ids, so anyone outside the directory still renders
+              // with their id rather than dropping out of the list entirely.
+              const person = resolvedPeople.find((p) => p.id === identity) ?? null;
+              return (
+                <div className="dark-person" key={identity}>
+                  <PersonAvatar person={person} size="sm" online={person?.online} />
+                  <span>
+                    <strong style={{ display: 'block' }}>
+                      {person?.name ?? identity}
+                      {identity === currentUserId && ' (You)'}
+                    </strong>
+                    {person?.jobTitle ?? 'Team member'}
+                  </span>
+                </div>
+              );
+            })
           ) : (
             <>
               <div className="meeting-chat">
@@ -154,11 +253,14 @@ export function MeetingRoom({
       </div>
 
       <div className="meeting-controls">
-        <button
+<button
           className={micOn ? 'control active' : 'control off'}
           type="button"
-          onClick={() => setMicOn((c) => !c)}
+          onClick={() => toggle(() => connectionRef.current!.setMicrophoneEnabled(!micOn), setMicOn)}
           aria-pressed={micOn}
+          // Disabled rather than inert when there is no room: a mic button that does
+          // nothing when you press it is worse than one that says why.
+          disabled={!videoConfigured || !connectionRef.current}
           aria-label={micOn ? 'Mute microphone' : 'Unmute microphone'}
         >
           {micOn ? <Mic size={17} /> : <MicOff size={17} />}
@@ -167,8 +269,9 @@ export function MeetingRoom({
         <button
           className={cameraOn ? 'control active' : 'control off'}
           type="button"
-          onClick={() => setCameraOn((c) => !c)}
+          onClick={() => toggle(() => connectionRef.current!.setCameraEnabled(!cameraOn), setCameraOn)}
           aria-pressed={cameraOn}
+          disabled={!videoConfigured || !connectionRef.current}
           aria-label={cameraOn ? 'Turn camera off' : 'Turn camera on'}
         >
           {cameraOn ? <Video size={17} /> : <VideoOff size={17} />}
@@ -177,8 +280,9 @@ export function MeetingRoom({
         <button
           className={sharing ? 'control active' : 'control'}
           type="button"
-          onClick={() => setSharing((c) => !c)}
+          onClick={() => toggle(() => connectionRef.current!.setScreenShareEnabled(!sharing), setSharing)}
           aria-pressed={sharing}
+          disabled={!videoConfigured || !connectionRef.current}
           aria-label="Share screen"
         >
           <MonitorUp size={17} />
@@ -187,8 +291,9 @@ export function MeetingRoom({
         <button
           className={handRaised ? 'control active' : 'control'}
           type="button"
-          onClick={() => setHandRaised((c) => !c)}
+          onClick={() => toggle(() => connectionRef.current!.setHandRaised(!handRaised), setHandRaised)}
           aria-pressed={handRaised}
+          disabled={!videoConfigured || !connectionRef.current}
           aria-label="Raise hand"
         >
           <Hand size={17} />
