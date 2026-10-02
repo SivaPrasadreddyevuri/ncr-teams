@@ -206,7 +206,14 @@ function rankedUnion(userId: string, term: string) {
       ts_rank_cd(e."searchVector", q.plain_query, 32)::float8 AS rank
     FROM "CalendarEvent" e
     CROSS JOIN q
-    WHERE e."startsAt" >= now() AND e."searchVector" @@ q.plain_query
+    -- now() converted to UTC, not bare now(). The startsAt column is timestamp
+    -- without time zone holding UTC, and a bare now() is a timestamptz that
+    -- Postgres casts into the session's TimeZone first -- so on a non-UTC host the
+    -- comparison reads as a wall-clock instant and events inside the offset silently
+    -- stop matching. Prisma's generated queries bind as UTC, so this also makes the
+    -- raw SQL agree with them. Same defect as the my_events CTE in routes/stats.ts.
+    WHERE e."startsAt" >= (now() AT TIME ZONE 'UTC')
+      AND e."searchVector" @@ q.plain_query
 
     UNION ALL
 

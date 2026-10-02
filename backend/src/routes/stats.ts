@@ -70,7 +70,22 @@ export function statsRouter() {
       my_events AS (
         SELECT e."id", e."type"
         FROM "CalendarEvent" e
-        WHERE e."startsAt" >= now()
+        -- AT TIME ZONE 'UTC', not a bare now() and not a bound parameter.
+        --
+        -- startsAt is timestamp-without-time-zone holding UTC. A bare now() is a
+        -- timestamptz, which Postgres casts into the session's TimeZone before the
+        -- comparison -- so on a host set to Asia/Calcutta the query compares against
+        -- IST wall-clock and reads as 5h30m ahead of the truth. A bound Date does not
+        -- help either: the raw-query path encodes that as local too.
+        --
+        -- Prisma's generated queries, however, bind their parameters as UTC-naive.
+        -- So the raw SQL and Prisma disagreed by exactly the host's offset, which is
+        -- why this route reported 2 upcoming meetings where the same predicate
+        -- through Prisma found 4.
+        --
+        -- Converting now() to UTC makes the raw SQL agree with the column and with
+        -- Prisma's encoding, and makes it independent of how the server is configured.
+        WHERE e."startsAt" >= (now() AT TIME ZONE 'UTC')
           AND (
             e."organizerId" = ${userId}
             OR EXISTS (
