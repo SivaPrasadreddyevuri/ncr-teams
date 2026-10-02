@@ -8,6 +8,15 @@
  * They run **without LiveKit credentials**, like `meeting.spec.ts`, so what they prove
  * is that the flow reaches the room and the room is honest about media. Whether a
  * camera track reaches a `<video>` element is `media.spec.ts`'s job.
+ *
+ * ## These write to the development database
+ *
+ * Pressing a call button creates a real `Meeting` row, so a run leaves a standing
+ * room behind per channel it touched. That is the same situation as every other
+ * browser test here: they run against the development database, not `ncr_teams_test`.
+ * `npm run db:demo` resets it, and `npm run db:verify` expects a freshly seeded one --
+ * so run that before verifying, as the README says. There is no delete endpoint for a
+ * meeting, which is why this cannot clean up after itself.
  */
 
 import { expect, test, type Page } from '@playwright/test';
